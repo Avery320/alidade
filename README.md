@@ -30,6 +30,18 @@ dotnet build src/Alidade/Alidade.csproj --configuration Release
 
 建置產物位於 `src/Alidade/bin/Release/net7.0/Alidade.gha`，目標執行環境為 Rhino 8（.NET Core 模式）。
 
+## 安裝和範例
+
+將建置產物 `Alidade.gha` 複製到 Grasshopper 載入第三方元件的資料夾，或把建置目錄加入 Rhino 的 `GrasshopperDeveloperSettings`。重新啟動 Rhino，開啟 Grasshopper，從 **Alidade** 分類加入元件。Rhino 與 Torquetum Desktop 或本機 Web 需在同一台電腦執行。 [McNeel Grasshopper 組件目錄說明](https://developer.rhino3d.com/api/gh1/type/grasshopper.folders/)
+
+1. 在 Torquetum 開啟測試專案，從 **Project Settings** 選擇 **Create read-write invitation** 並複製配對碼。在 **Connect to Torquetum** 元件選單執行 **Pair from clipboard**。
+2. 在公釐 Rhino 文件準備 `{0}` 的點 `(1000, 0, 0)` 和線段。接到 **Build Geometry Collection**，再把 `Collection` 和 Connect 的 `Project` 接到 **Send Geometry**。填入 `Name` 後選 **Create**，並在 Torquetum 的 Station 核對點的 X 座標是 1 m。
+3. 將該 `Project` 接到 **Select Project Geometry** 與 **Read Geometry**。從 Select 選單選擇剛建立的項目，將 `Geometry Ref` 接到 Read，然後將 Read 的 `Collection` 接到 **Unpack Geometry Collection**。填入 `Target units = cm`，點的 X 座標應為 100，分支和槽位應與原樹一致。
+4. 修改來源點後，把 Read 輸出的新版 `Geometry Ref` 接到 Send 的 `Target`，再執行 **Replace**。若讀到過期版本，先用 **Refresh read** 取得最新版本，再核對並替換。若回執未確定，使用 **Check result** 或 **Retry same request**。
+5. 若要從 Torquetum 送回一棵圖輸出樹，在 Asterism 對指定幾何輸出埠執行 **Bake Geometry Tree**，再用 **Refresh list** 從 Grasshopper 選擇該新 Station 集合。
+
+Build 和 Unpack 保留有效的空分支、null 槽與項目鍵。CAD 能力依配對的 `collectionVersions` 和 `kinds` 決定。可用兩份共用 JSON 測試資料確認交換格式。 [v1 基礎幾何](contracts/alidade/v1/fixtures/geometry-collection.json) · [v2 STEP 面、殼與實體](contracts/alidade/v2/fixtures/geometry-collection.json)
+
 ## 本機驗收
 
 在 macOS 可使用已安裝的 Rhino 8.6 與其 .NET 7 執行環境，檢查 v1、v2 契約、STEP 檔頭處理和實際 Grasshopper SDK 的部分資料樹往返：
@@ -42,7 +54,7 @@ alidade_rhino_resources="/Applications/Rhino 8.app/Contents/Frameworks/RhCore.fr
   src/Alidade/bin/Release/net7.0/Alidade.gha contracts/alidade/v1/fixtures/geometry-collection.json
 ```
 
-Intel Mac 使用 Rhino 目錄中的 `x86_64` 執行環境，Apple Silicon 使用 `arm64`。驗收程式會直接載入外掛組件。需由 Rhino 載入原生程式庫的幾何及元件接線，仍需用 Rhino 內的 Grasshopper 驗收。
+Intel Mac 使用 Rhino 目錄中的 `x86_64` 執行環境，Apple Silicon 使用 `arm64`。驗收程式會載入外掛組件並檢查託管的 Grasshopper 資料樹和共用契約。實際元件接線、Rhino STEP 匯入及匯出仍待 Rhino 視窗驗收。
 
 同一驗收程式加上 `--exchange` 可驗真實的本機 Torquetum API。在測試專案取得讀寫邀請，從標準輸入送入配對碼。此測試會在該專案建立並更新一個測試集合，並確認相同請求重試、資料樹讀回與過期版本拒絕。若已協商 v2，測試會另外送出合成的 STEP 面、殼與實體。
 
