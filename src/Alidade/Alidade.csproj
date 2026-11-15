@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0</TargetFramework>
+    <TargetExt>.gha</TargetExt>
+    <RootNamespace>Torquetum.Alidade</RootNamespace>
+    <Nullable>enable</Nullable>
+    <Version>0.1.0</Version>
+    <RhinoSdkVersion>8.6.24101.5001</RhinoSdkVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Rhino 8.6 runs on .NET 7 and publishes its SDK references under net48. -->
+    <PackageReference Include="Grasshopper" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" NoWarn="NU1701" />
+    <PackageReference Include="RhinoCommon" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" NoWarn="NU1701" />
+  </ItemGroup>
+</Project>
