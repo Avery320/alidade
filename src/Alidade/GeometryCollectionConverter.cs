@@ -261,7 +261,14 @@ internal static class GeometryCollectionConverter
         {
             var interval = Interval(domain, 1);
             if (interval.T0 != 0 || interval.T1 != 1)
-                return new GH_Curve(new LineCurve(line, interval.T0, interval.T1));
+            {
+                var curve = new LineCurve(line, interval.T0, interval.T1);
+                if (curve.IsValid && curve.Domain == interval)
+                    return new GH_Curve(curve);
+                curve.Dispose();
+                throw CollectionFormatException.At("PARAMETERIZATION_UNSUPPORTED",
+                    "Rhino could not reconstruct the line's original domain.", "domain");
+            }
         }
         return new GH_Line(line);
     }

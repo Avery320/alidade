@@ -174,8 +174,6 @@ public sealed class GeometryCollection
         }
         if (closed && (previous == first || distinct!.Count < 3))
             throw Invalid("A closed polyline needs three distinct vertices and no repeated closing vertex.", "points");
-        if (!closed && previous == first)
-            throw Invalid("The endpoints of an open polyline must differ.", "closed");
     }
 
     private static void CheckPlane(JsonElement item)
