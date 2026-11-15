@@ -10,6 +10,13 @@
 
   <ItemGroup>
     <!-- Rhino 8.6 runs on .NET 7 and publishes its SDK references under net48. -->
+    <!-- Grasshopper 1 menus use WinForms. Rhino 8 supplies the Mac runtime shim. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3"
+                      ExcludeAssets="all" GeneratePathProperty="true" PrivateAssets="all" />
+    <Reference Include="System.Windows.Forms"
+               HintPath="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net48)/build/.NETFramework/v4.8/System.Windows.Forms.dll"
+               Private="false" />
+    <PackageReference Include="System.Drawing.Common" Version="7.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Grasshopper" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" NoWarn="NU1701" />
     <PackageReference Include="RhinoCommon" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" NoWarn="NU1701" />
   </ItemGroup>

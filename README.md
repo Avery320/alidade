@@ -12,7 +12,7 @@ Alidade is a Grasshopper plugin project for exchanging geometry and data trees w
 
 ## 專案狀態
 
-目前可建置 Grasshopper 外掛的基礎組件 `Alidade.gha`。連線、幾何交換與資料樹元件規劃中。
+`Alidade.gha` 提供 **Connect to Torquetum** 元件。在已啟用 Alidade 的本機 Torquetum 專案複製配對邀請，再從元件選單選擇 **Pair from clipboard**。輸出顯示專案與讀寫權限。使用 **Refresh status** 查詢目前狀態，或用 **Disconnect** 清除該 Grasshopper 文件的連線。重開或複製定義後須重新配對。幾何交換與資料樹元件仍在開發。
 
 ## 本機建置
 
@@ -27,6 +27,8 @@ dotnet build src/Alidade/Alidade.csproj --configuration Release
 ## 交換契約
 
 `contracts/alidade/v1` 包含 Alidade v1 的 [JSON Schema](contracts/alidade/v1/geometry-collection.schema.json) 與[合成測試資料](contracts/alidade/v1/fixtures/geometry-collection.json)，可在本機獨立使用。這兩個檔案原樣取自 Torquetum 的契約提交 `5a425a104dc6ba5978412d23e962999027f6cf11`。更新時先修改來源，再同步同版測試資料。
+
+[連線契約](contracts/alidade/v1/connection.md)與[合成請求及回覆](contracts/alidade/v1/fixtures/connection.json)原樣取自 Torquetum 提交 `fe6420040d0facc2eb2b577365a25ccfad836244`。
 
 ## 授權
 
