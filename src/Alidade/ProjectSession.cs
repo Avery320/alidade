@@ -10,7 +10,11 @@ using GH_IO.Serialization;
 namespace Torquetum.Alidade;
 
 internal sealed record ProjectStatus(
-    string ProjectId, Guid InstanceId, string ProjectName, bool CanRead, bool CanWrite, string? AvailabilityReason);
+    string ProjectId, Guid InstanceId, string ProjectName, bool CanRead, bool CanWrite,
+    string? AvailabilityReason, bool SupportsStep, int MaxBodyBytes)
+{
+    internal bool SupportsCollection(int version) => version == 1 || (version == 2 && SupportsStep);
+}
 
 public sealed class ProjectSession
 {

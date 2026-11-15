@@ -124,7 +124,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
                 _ready = "Select a replaceable geometry in the connected project.";
                 return null;
             }
-            _ready = project.Status.CanWrite ? "Ready to replace geometry." : AlidadeClient.ErrorMessage("READ_ONLY");
+            _ready = Availability(project, collection, "Ready to replace geometry.");
             return new Inputs(project, collection, reference, "");
         }
 
@@ -134,9 +134,14 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             _ready = "Enter a name for Create.";
             return null;
         }
-        _ready = project.Status.CanWrite ? "Ready to create geometry." : AlidadeClient.ErrorMessage("READ_ONLY");
+        _ready = Availability(project, collection, "Ready to create geometry.");
         return new Inputs(project, collection, null, name.Trim());
     }
+
+    private static string Availability(ProjectSession project, GeometryCollection collection, string ready) =>
+        !project.Status.CanWrite ? AlidadeClient.ErrorMessage("READ_ONLY")
+        : !project.Status.SupportsCollection(collection.SchemaVersion) ? "The paired project does not offer precise STEP exchange."
+        : ready;
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
     {
@@ -150,6 +155,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     }
 
     private bool CanStart(bool replace) => _inputs is { } input && input.Project.Status.CanWrite
+        && input.Project.Status.SupportsCollection(input.Collection.SchemaVersion)
         && (input.Target != null) == replace && (_attempt == null || _attempt.CanStartAnother);
 
     private bool CanContinue(bool check) =>

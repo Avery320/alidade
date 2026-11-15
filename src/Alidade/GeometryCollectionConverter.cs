@@ -44,7 +44,8 @@ internal static class GeometryCollectionConverter
     }
 
     internal static GeometryCollection? Build(
-        GH_Structure<IGH_Goo> geometry, GH_Structure<GH_String>? keys, double scale, List<CollectionDiagnostic> diagnostics)
+        GH_Structure<IGH_Goo> geometry, GH_Structure<GH_String>? keys, double scale, List<CollectionDiagnostic> diagnostics,
+        RhinoDoc? document)
     {
         if (keys != null && keys.PathCount != geometry.PathCount)
         {
@@ -52,6 +53,9 @@ internal static class GeometryCollectionConverter
             return null;
         }
         var branches = new List<object>(geometry.PathCount);
+        var schemaVersion = 1;
+        double? toleranceMetres = null;
+        double CadTolerance() => toleranceMetres ??= RhinoStepGeometry.ToleranceMetres(document);
         for (var branchIndex = 0; branchIndex < geometry.PathCount; branchIndex++)
         {
             var path = geometry.Paths[branchIndex].Indices.ToArray();
@@ -76,10 +80,12 @@ internal static class GeometryCollectionConverter
                 }
                 try
                 {
-                    var shape = EncodeItem(item, scale, (code, message) => diagnostics.Add(
+                    var shape = EncodeItem(item, scale, CadTolerance, (code, message) => diagnostics.Add(
                         new CollectionDiagnostic(code, message, path, index, Warning: true)));
                     if (key != null)
                         shape["itemKey"] = key;
+                    if (shape["kind"] is "brep-step")
+                        schemaVersion = 2;
                     items[index] = shape;
                 }
                 catch (CollectionFormatException error)
@@ -93,7 +99,7 @@ internal static class GeometryCollectionConverter
             return null;
         try
         {
-            return GeometryCollection.Parse(GeometryCollection.Snapshot(branches));
+            return GeometryCollection.Parse(GeometryCollection.Snapshot(branches, schemaVersion));
         }
         catch (CollectionFormatException error)
         {
@@ -103,10 +109,12 @@ internal static class GeometryCollectionConverter
     }
 
     internal static (GH_Structure<IGH_Goo> Geometry, GH_Structure<GH_String> Keys)? Unpack(
-        GeometryCollection collection, double scale, List<CollectionDiagnostic> diagnostics)
+        GeometryCollection collection, double scale, List<CollectionDiagnostic> diagnostics, RhinoDoc? document)
     {
         var geometry = new GH_Structure<IGH_Goo>();
         var keys = new GH_Structure<GH_String>();
+        double? toleranceMetres = null;
+        double CadTolerance() => toleranceMetres ??= RhinoStepGeometry.ToleranceMetres(document);
         foreach (var branch in collection.Payload.GetProperty("branches").EnumerateArray())
         {
             var indices = branch.GetProperty("path").EnumerateArray().Select(value => (int)value.GetDouble()).ToArray();
@@ -118,7 +126,7 @@ internal static class GeometryCollectionConverter
             {
                 try
                 {
-                    geometry.Append(item.ValueKind == JsonValueKind.Null ? null! : DecodeItem(item, scale), path);
+                    geometry.Append(item.ValueKind == JsonValueKind.Null ? null! : DecodeItem(item, scale, CadTolerance), path);
                     keys.Append(item.ValueKind == JsonValueKind.Object && item.TryGetProperty("itemKey", out var key)
                         ? new GH_String(key.GetString()) : null!, path);
                 }
@@ -137,11 +145,13 @@ internal static class GeometryCollectionConverter
         {
             if (item is GH_Curve curve) curve.Value.Dispose();
             if (item is GH_Mesh mesh) mesh.Value.Dispose();
+            if (item is GH_Brep brep) brep.Value.Dispose();
         }
         return null;
     }
 
-    private static Dictionary<string, object?> EncodeItem(IGH_Goo item, double scale, Action<string, string> warn)
+    private static Dictionary<string, object?> EncodeItem(IGH_Goo item, double scale, Func<double> cadTolerance,
+        Action<string, string> warn)
     {
         var native = item is GH_ObjectWrapper wrapper ? wrapper.Value : item.ScriptVariable();
         if (native is IGH_Goo wrapped)
@@ -160,6 +170,7 @@ internal static class GeometryCollectionConverter
                 ("plane", new { origin = Point(box.Plane.Origin, scale), normal = Vector(box.Plane.ZAxis), direction = Vector(box.Plane.XAxis) }),
                 ("x", Interval(box.X, scale)), ("y", Interval(box.Y, scale)), ("z", Interval(box.Z, scale))),
             Mesh mesh => EncodeMesh(mesh, scale, warn),
+            Brep or Surface => EncodeStep((GeometryBase)native, scale, cadTolerance()),
             _ => throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY",
                 $"This collection version cannot represent {native?.GetType().Name ?? item.TypeName}."),
         };
@@ -184,8 +195,8 @@ internal static class GeometryCollectionConverter
     private static Dictionary<string, object?> EncodeCurve(Curve curve, double scale)
     {
         if (curve is not PolylineCurve && curve is not NurbsCurve { Degree: 1, IsRational: false })
-            throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY",
-                $"This collection version cannot preserve a {curve.GetType().Name} curve.");
+            throw CollectionFormatException.At("EXACT_CURVE_UNAVAILABLE",
+                $"This version cannot preserve the parameterization of a {curve.GetType().Name} curve.");
         if (!curve.TryGetPolyline(out var points, out var parameters)
             || points.Count < 2 || parameters.Length != points.Count
             || curve.IsClosed != IsClosed(points) || !IsUniform(parameters, curve.Domain))
@@ -237,7 +248,7 @@ internal static class GeometryCollectionConverter
             ("triangles", mesh.Faces.Select(face => new[] { face.A, face.B, face.C }).ToArray()));
     }
 
-    private static IGH_Goo DecodeItem(JsonElement item, double scale)
+    private static IGH_Goo DecodeItem(JsonElement item, double scale, Func<double> cadTolerance)
     {
         Point3d Position(string field) => Point(item.GetProperty(field), scale);
         Interval Section(string field) => Interval(item.GetProperty(field), scale);
@@ -249,6 +260,8 @@ internal static class GeometryCollectionConverter
             "plane" => PlaneGoo(item, scale),
             "box" => new GH_Box(new Box(ReadPlane(item.GetProperty("plane"), scale), Section("x"), Section("y"), Section("z"))),
             "triangle-mesh" => DecodeMesh(item, scale),
+            "brep-step" => new GH_Brep(RhinoStepGeometry.Decode(item.GetProperty("shapeType").GetString()!,
+                item.GetProperty("step").GetString()!, scale, cadTolerance())),
             _ => throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This collection version cannot be unpacked."),
         };
     }
@@ -296,6 +309,12 @@ internal static class GeometryCollectionConverter
             curve.Dispose();
             throw;
         }
+    }
+
+    private static Dictionary<string, object?> EncodeStep(GeometryBase geometry, double scale, double tolerance)
+    {
+        var (shapeType, text) = RhinoStepGeometry.Encode(geometry, scale, tolerance);
+        return Fields("brep-step", ("shapeType", shapeType), ("step", text));
     }
 
     private static GH_Plane PlaneGoo(JsonElement item, double scale) => new(ReadPlane(item, scale));

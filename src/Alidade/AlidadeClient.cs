@@ -20,8 +20,8 @@ internal static partial class AlidadeClient
         UseProxy = false,
     })
     {
-        Timeout = TimeSpan.FromSeconds(15),
-        MaxResponseContentBufferSize = MaxGeometryBytes,
+        Timeout = Timeout.InfiniteTimeSpan,
+        MaxResponseContentBufferSize = StepText.MaxExchangeBytes,
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -37,7 +37,7 @@ internal static partial class AlidadeClient
                 invite = invitation.Invite,
                 clientName = "Alidade for Grasshopper",
                 apiVersion = ApiVersion,
-                collectionVersions = new[] { 1 },
+                collectionVersions = new[] { 1, 2 },
             });
             var grant = await SendAsync<Grant>(request, cancellation).ConfigureAwait(false);
             if (grant.InstanceId != invitation.InstanceId ||
@@ -78,9 +78,11 @@ internal static partial class AlidadeClient
     }
 
     private static async Task<HttpResponseMessage> SendForStatusAsync(
-        HttpRequestMessage request, HttpStatusCode expected, CancellationToken cancellation)
+        HttpRequestMessage request, HttpStatusCode expected, CancellationToken cancellation, int timeoutSeconds = 15)
     {
-        var response = await Http.SendAsync(request, cancellation).ConfigureAwait(false);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
         if (response.StatusCode == expected)
             return response;
 
@@ -129,6 +131,8 @@ internal static partial class AlidadeClient
         "CONTENT_TOO_LARGE" => "The collection exceeds the Torquetum transfer limit.",
         "INVALID_GEOMETRY" => "Torquetum rejected geometry in the collection.",
         "UNSUPPORTED_GEOMETRY" => "This collection contains geometry Torquetum cannot exchange.",
+        "INVALID_STEP" => "Torquetum rejected a STEP item.",
+        "EXACT_CURVE_UNAVAILABLE" => "Torquetum cannot preserve the parameterization of this curve.",
         "INVALID_REQUEST" => "Torquetum rejected the request fields.",
         "UNSUPPORTED_MEDIA_TYPE" => "Torquetum cannot read this exchange format.",
         _ => "Torquetum rejected the request.",
@@ -192,6 +196,8 @@ internal static partial class AlidadeClient
         public required int[] CollectionVersions { get; init; }
         public required bool CanRead { get; init; }
         public required bool CanWrite { get; init; }
+        public string[]? Kinds { get; init; }
+        public ProjectLimits? Limits { get; init; }
         public string? AvailabilityReason { get; init; }
 
         public ProjectStatus Status()
@@ -201,8 +207,18 @@ internal static partial class AlidadeClient
                 CollectionVersions == null || !Array.Exists(CollectionVersions, version => version == 1) ||
                 (CanWrite && !CanRead))
                 throw new JsonException();
-            return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason);
+            var step = Array.Exists(CollectionVersions, version => version == 2)
+                && Kinds != null && Array.Exists(Kinds, kind => kind == "brep-step");
+            var bytes = Limits?.MaxBodyBytes is > 0 and var advertised
+                ? Math.Min(advertised, StepText.MaxExchangeBytes)
+                : step ? StepText.MaxExchangeBytes : 8 * 1024 * 1024;
+            return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason, step, bytes);
         }
+    }
+
+    private sealed class ProjectLimits
+    {
+        public int MaxBodyBytes { get; init; }
     }
 
     private sealed class Grant : ProjectResponse

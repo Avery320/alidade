@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Avery320/torquetum/main/contracts/alidade/v2/geometry-collection.schema.json",
+  "title": "Alidade Geometry Collection v2",
+  "description": "Alidade v1 geometry with optional exact, single-shape STEP items.",
+  "type": "object",
+  "required": ["schemaVersion", "units", "space", "branches"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "units": { "$ref": "../v1/geometry-collection.schema.json#/properties/units" },
+    "space": { "$ref": "../v1/geometry-collection.schema.json#/properties/space" },
+    "branches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "items"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "$ref": "../v1/geometry-collection.schema.json#/properties/branches/items/properties/path" },
+          "items": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                { "$ref": "../v1/geometry-collection.schema.json#/properties/branches/items/properties/items/items" },
+                { "$ref": "#/$defs/brep-step" }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "brep-step": {
+      "type": "object",
+      "required": ["kind", "shapeType", "step"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "brep-step" },
+        "shapeType": { "enum": ["face", "shell", "solid"] },
+        "step": { "type": "string", "pattern": "^\\s*ISO-10303-21;" },
+        "itemKey": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

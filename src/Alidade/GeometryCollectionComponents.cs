@@ -64,8 +64,9 @@ public sealed class BuildGeometryCollection : GH_Component
                 keys = Params.Input[1].SourceCount == 0 ? null : new GH_Structure<GH_String>();
             string? units = null;
             data.GetData(2, ref units);
-            var scale = GeometryCollectionConverter.MetresPerUnit(units, OnPingDocument()?.RhinoDocument);
-            var collection = GeometryCollectionConverter.Build(geometry ?? new GH_Structure<IGH_Goo>(), keys, scale, diagnostics);
+            var document = OnPingDocument()?.RhinoDocument;
+            var scale = GeometryCollectionConverter.MetresPerUnit(units, document);
+            var collection = GeometryCollectionConverter.Build(geometry ?? new GH_Structure<IGH_Goo>(), keys, scale, diagnostics, document);
             if (collection != null)
             {
                 Message = collection.ToString();
@@ -116,8 +117,9 @@ public sealed class UnpackGeometryCollection : GH_Component
         {
             string? units = null;
             data.GetData(1, ref units);
-            var scale = GeometryCollectionConverter.MetresPerUnit(units, OnPingDocument()?.RhinoDocument);
-            var unpacked = GeometryCollectionConverter.Unpack(collection, 1 / scale, diagnostics);
+            var document = OnPingDocument()?.RhinoDocument;
+            var scale = GeometryCollectionConverter.MetresPerUnit(units, document);
+            var unpacked = GeometryCollectionConverter.Unpack(collection, 1 / scale, diagnostics, document);
             if (unpacked is { } trees)
             {
                 // The parameter types match these structures. Copy them without Grasshopper re-matching empty slots.

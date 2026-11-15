@@ -17,12 +17,11 @@ internal sealed record GeometryListing(string EntityId, string Name, string[] Pa
 }
 
 internal sealed record GeometrySnapshot(GeometryCollection Collection, GeometryReference Reference);
-internal sealed record GeometryWriteRequest(Guid Id, string? EntityId, string? ETag, ReadOnlyMemory<byte> Payload);
+internal sealed record GeometryWriteRequest(Guid Id, string? EntityId, string? ETag, int SchemaVersion, ReadOnlyMemory<byte> Payload);
 
 internal static partial class AlidadeClient
 {
     private const string GeometryRoute = "/v1/geometry";
-    private const int MaxGeometryBytes = 8 * 1024 * 1024;
 
     private sealed class GeometryIndex
     {
@@ -66,12 +65,16 @@ internal static partial class AlidadeClient
         GeometryReference target, CancellationToken cancellation)
     {
         using var request = project.Request(documentId, HttpMethod.Get, EntityRoute(target.EntityId));
-        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation).ConfigureAwait(false);
+        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation,
+            timeoutSeconds: project.Status.SupportsStep ? 60 : 15).ConfigureAwait(false);
         var tag = response.Headers.ETag?.ToString();
         if (!StrongTag(tag))
             throw new JsonException();
         var payload = await ReadJsonAsync<JsonElement>(response, cancellation).ConfigureAwait(false);
-        return new GeometrySnapshot(GeometryCollection.Parse(payload), target with { ETag = tag! });
+        var collection = GeometryCollection.Parse(payload);
+        if (!project.Status.SupportsCollection(collection.SchemaVersion))
+            throw new AlidadeConnectionException("The paired project did not negotiate this collection format.");
+        return new GeometrySnapshot(collection, target with { ETag = tag! });
     }
 
     internal static GeometryWriteRequest PrepareWrite(GeometryCollection collection, string name, GeometryReference? target)
@@ -86,14 +89,20 @@ internal static partial class AlidadeClient
         var payload = target == null
             ? JsonSerializer.SerializeToUtf8Bytes(new { name = name.Trim(), collection = collection.Payload }, JsonOptions)
             : JsonSerializer.SerializeToUtf8Bytes(new { collection = collection.Payload }, JsonOptions);
-        if (payload.Length > MaxGeometryBytes)
+        if (payload.Length > StepText.MaxExchangeBytes)
             throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
-        return new GeometryWriteRequest(Guid.NewGuid(), target?.EntityId, target?.ETag, payload);
+        return new GeometryWriteRequest(Guid.NewGuid(), target?.EntityId, target?.ETag, collection.SchemaVersion, payload);
     }
 
     internal static async Task<GeometryReceipt> WriteGeometryAsync(ProjectSession project, ulong documentId,
         GeometryWriteRequest write, CancellationToken cancellation)
     {
+        if (!project.IsValidFor(documentId))
+            throw new AlidadeConnectionException(ErrorMessage("PAIRING_REQUIRED"), pairingRequired: true);
+        if (!project.Status.SupportsCollection(write.SchemaVersion))
+            throw new AlidadeConnectionException("The paired project does not offer precise STEP exchange.");
+        if (write.Payload.Length > project.Status.MaxBodyBytes)
+            throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
         var receiptPath = ReceiptRoute(write.Id);
         var replacing = write.EntityId is { };
         using (var request = project.Request(documentId, replacing ? HttpMethod.Put : HttpMethod.Post,

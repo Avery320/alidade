@@ -24,7 +24,9 @@ Control messages use text frames. Each binary request or response frame contains
 | `PUT /v1/geometry/{entityId}` | Bearer, request ID, a single strong `If-Match` from a read or receipt, and JSON `{collection}`. | `202` with a relative receipt URL or `412 STALE_REVISION`. Missing `If-Match` gives `428 PRECONDITION_REQUIRED`. |
 | `GET /v1/requests/{requestId}` | The same grant as the mutation. | `200` with `{requestId,state,result?}` or `404 REQUEST_UNKNOWN`. |
 
-The corresponding geometry bridge route names are `geometry-list`, `geometry-read`, `geometry-create`, `geometry-replace` and `receipt`. Geometry requests and responses are limited to 8 MiB in v1.
+The corresponding geometry bridge route names are `geometry-list`, `geometry-read`, `geometry-create`, `geometry-replace` and `receipt`. Geometry bodies have a 32 MiB maximum on hosts offering exact CAD. Other hosts may have a lower limit. Use the paired Project's `limits.maxBodyBytes`. Geometry reads allow up to 60 seconds on hosts offering CAD. The normal relay limit is 15 seconds.
+
+Clients include collection version 1 at pairing and may also offer version 2. The grant's `collectionVersions` and `kinds` are authoritative. Both versions use the same HTTP routes. Snapshots that can be represented by the six v1 kinds use schema version 1. A snapshot containing an exact STEP item uses [collection version 2](../v2/geometry-collection.md) and requires that version in the grant. A v1 grant receives `422 UNSUPPORTED_GEOMETRY` when reading a CAD-only item or attempting a v2 write. An admitted write reports that error in its receipt.
 
 `202` records admission. Follow the same host's relative `/v1/requests/{requestId}` to read the receipt. A receipt is `pending`, `committed` or `rejected`. A committed result contains `httpStatus` (201 create or 200 replace), `entityId` and `etag`. A rejected result contains `httpStatus` and an `error` object. A committed receipt confirms the running Station transaction. Save is a separate Project operation.
 
