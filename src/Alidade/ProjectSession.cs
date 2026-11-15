@@ -1,4 +1,6 @@
 using System;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Grasshopper.Kernel;
@@ -15,7 +17,7 @@ public sealed class ProjectSession
     private readonly Uri _endpoint;
     private readonly ulong _documentId;
     private readonly DateTimeOffset _expiresAt;
-    private string? _accessToken;
+    private volatile string? _accessToken;
 
     internal ProjectSession(Uri endpoint, ulong documentId, ProjectStatus status, string accessToken, DateTimeOffset expiresAt)
     {
@@ -34,12 +36,19 @@ public sealed class ProjectSession
 
     internal void Disconnect() => _accessToken = null;
 
-    internal async Task<ProjectStatus> RefreshAsync(ulong documentId, CancellationToken cancellation)
+    internal HttpRequestMessage Request(ulong documentId, HttpMethod method, string path)
     {
         if (!IsValidFor(documentId) || _accessToken is not { } token)
             throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+        var request = new HttpRequestMessage(method, new Uri(_endpoint, path));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return request;
+    }
 
-        var status = await AlidadeClient.ReadProjectAsync(_endpoint, token, cancellation).ConfigureAwait(false);
+    internal async Task<ProjectStatus> RefreshAsync(ulong documentId, CancellationToken cancellation)
+    {
+        using var request = Request(documentId, HttpMethod.Get, "/v1/project");
+        var status = await AlidadeClient.ReadProjectAsync(request, cancellation).ConfigureAwait(false);
         if (status.InstanceId != Status.InstanceId || status.ProjectId != Status.ProjectId)
             throw new AlidadeConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
         return status;

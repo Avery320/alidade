@@ -10,8 +10,8 @@ using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
 
-if (args.Length != 2)
-    throw new ArgumentException("Usage: Alidade.Checks <Alidade.gha> <geometry-collection.json>");
+if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] != "--exchange"))
+    throw new ArgumentException("Usage: Alidade.Checks <Alidade.gha> <geometry-collection.json> [--exchange]");
 
 var plugin = Assembly.LoadFrom(Path.GetFullPath(args[0]));
 var geometryCollection = plugin.GetType("Torquetum.Alidade.GeometryCollection", throwOnError: true)!;
@@ -66,6 +66,9 @@ Check(build.Invoke(null, new object[] { geometry, keys, 0.01d, diagnostics }) ==
     && diagnostics.Cast<object>().Any(item => item.ToString()!.Contains("ITEM_KEYS_STRUCTURE", StringComparison.Ordinal)),
     "key structure mismatch rejects the whole collection");
 Console.WriteLine("PASS six v1 kinds, malformed wire, and native GH tree geometry/key alignment.");
+if (args.Length == 3)
+    await GeometryExchangeCheck.Run(plugin, collection, Console.ReadLine() ?? "");
+
 
 object Parse(string json)
 {

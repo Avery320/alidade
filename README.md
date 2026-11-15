@@ -16,6 +16,8 @@ Alidade is a Grasshopper plugin project for exchanging geometry and data trees w
 
 用 **Build Geometry Collection** 將 Rhino 點、線、折線、平面、盒與網格整理成集合，用 **Unpack Geometry Collection** 取回原生幾何。兩個元件都保留資料樹路徑、空分支、null 槽與項目鍵。單位可在元件中指定，省略時讀取 Grasshopper 文件關聯的 Rhino 模型單位。此轉換可離線操作。
 
+**Select Project Geometry** 可從元件選單選取 Station 幾何。**Read Geometry** 將它讀成 Collection，**Send Geometry** 的選單提供明確的 **Create** 和 **Replace**。若結果待確認，可查回執或重試原請求，Grasshopper 重算只更新輸入狀態。
+
 ## 本機建置
 
 從儲存庫根目錄使用 .NET SDK 7 以上版本執行下列指令。NuGet 會取得固定版本的 Rhino 8.6 SDK，執行外掛時由 Rhino 提供 Grasshopper 和 RhinoCommon。
@@ -40,11 +42,13 @@ alidade_rhino_resources="/Applications/Rhino 8.app/Contents/Frameworks/RhCore.fr
 
 Intel Mac 使用 Rhino 目錄中的 `x86_64` 執行環境，Apple Silicon 使用 `arm64`。驗收程式會直接載入外掛組件。需由 Rhino 載入原生程式庫的幾何及元件接線，仍需用 Rhino 內的 Grasshopper 驗收。
 
+同一驗收程式加上 `--exchange` 可驗真實的本機 Torquetum API。在測試專案取得讀寫邀請，從標準輸入送入配對碼。此測試會在該專案建立並更新一個測試集合，並確認相同請求重試、資料樹讀回與過期版本拒絕。
+
 ## 交換契約
 
 `contracts/alidade/v1` 包含 Alidade v1 的 [JSON Schema](contracts/alidade/v1/geometry-collection.schema.json) 與[合成測試資料](contracts/alidade/v1/fixtures/geometry-collection.json)，可在本機獨立使用。這兩個檔案原樣取自 Torquetum 的契約提交 `5a425a104dc6ba5978412d23e962999027f6cf11`。更新時先修改來源，再同步同版測試資料。
 
-[連線契約](contracts/alidade/v1/connection.md)與[合成請求及回覆](contracts/alidade/v1/fixtures/connection.json)原樣取自 Torquetum 提交 `fe6420040d0facc2eb2b577365a25ccfad836244`。
+[連線與交換契約](contracts/alidade/v1/connection.md)取自 Torquetum 提交 `f3b64e0`。[合成連線資料](contracts/alidade/v1/fixtures/connection.json)取自 `fe64200`。
 
 ## 授權
 
