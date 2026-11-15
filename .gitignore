@@ -1,0 +1,23 @@
+# .NET build and test output
+[Bb]in/
+[Oo]bj/
+TestResults/
+artifacts/
+*.gha
+*.yak
+
+# Local IDE settings
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Operating system files
+.DS_Store
+Thumbs.db
