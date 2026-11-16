@@ -156,13 +156,16 @@ internal static class GeometryCollectionConverter
         var native = item is GH_ObjectWrapper wrapper ? wrapper.Value : item.ScriptVariable();
         if (native is IGH_Goo wrapped)
             native = wrapped.ScriptVariable();
-        return native switch
+        Dictionary<string, object?> EncodePoint(Point3d point) => Fields("point", ("position", Point(point, scale)));
+        Dictionary<string, object?> EncodeLine(Point3d from, Point3d to) =>
+            Fields("line", ("start", Point(from, scale)), ("end", Point(to, scale)));
+        var shape = native switch
         {
-            Point3d point => Fields("point", ("position", Point(point, scale))),
-            Rhino.Geometry.Point point => Fields("point", ("position", Point(point.Location, scale))),
-            Line line => EncodeLine(line, scale, null),
-            LineCurve line => EncodeLine(new Line(line.PointAtStart, line.PointAtEnd), scale, line.Domain),
-            Polyline polyline => EncodePolyline(polyline, scale, null),
+            Point3d point => EncodePoint(point),
+            Rhino.Geometry.Point point => EncodePoint(point.Location),
+            Line line => EncodeLine(line.From, line.To),
+            LineCurve line => EncodeLine(line.PointAtStart, line.PointAtEnd),
+            Polyline polyline => EncodePolyline(polyline, scale),
             Curve curve => EncodeCurve(curve, scale),
             Plane plane => Fields("plane", ("origin", Point(plane.Origin, scale)),
                 ("normal", Vector(plane.ZAxis)), ("direction", Vector(plane.XAxis))),
@@ -174,6 +177,9 @@ internal static class GeometryCollectionConverter
             _ => throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY",
                 $"This collection version cannot represent {native?.GetType().Name ?? item.TypeName}."),
         };
+        if (native is Curve source)
+            shape["domain"] = Interval(source.Domain, 1);
+        return shape;
     }
 
     private static Dictionary<string, object?> Fields(string kind, params (string Field, object? Value)[] fields)
@@ -181,14 +187,6 @@ internal static class GeometryCollectionConverter
         var shape = new Dictionary<string, object?>(StringComparer.Ordinal) { ["kind"] = kind };
         foreach (var (field, value) in fields)
             shape.Add(field, value);
-        return shape;
-    }
-
-    private static Dictionary<string, object?> EncodeLine(Line line, double scale, Interval? domain)
-    {
-        var shape = Fields("line", ("start", Point(line.From, scale)), ("end", Point(line.To, scale)));
-        if (domain is { } value)
-            shape["domain"] = Interval(value, 1);
         return shape;
     }
 
@@ -202,17 +200,14 @@ internal static class GeometryCollectionConverter
             || curve.IsClosed != IsClosed(points) || !IsUniform(parameters, curve.Domain))
             throw CollectionFormatException.At("PARAMETERIZATION_UNSUPPORTED",
                 "The curve's vertex positions and parameterization are not reproducible as a v1 polyline.");
-        return EncodePolyline(points, scale, curve.Domain);
+        return EncodePolyline(points, scale);
     }
 
-    private static Dictionary<string, object?> EncodePolyline(Polyline line, double scale, Interval? domain)
+    private static Dictionary<string, object?> EncodePolyline(Polyline line, double scale)
     {
         var closed = IsClosed(line);
         var points = line.Take(line.Count - (closed ? 1 : 0)).Select(point => Point(point, scale)).ToArray();
-        var shape = Fields("polyline", ("points", points), ("closed", closed));
-        if (domain is { } value)
-            shape["domain"] = Interval(value, 1);
-        return shape;
+        return Fields("polyline", ("points", points), ("closed", closed));
     }
 
     private static bool IsClosed(Polyline points) => points.Count > 2 && points.First == points.Last;
@@ -270,20 +265,15 @@ internal static class GeometryCollectionConverter
     {
         if (line.From == line.To)
             throw CollectionFormatException.At("PRECISION_LOSS", "Unit conversion made the line's endpoints coincide.");
-        if (item.TryGetProperty("domain", out var domain))
-        {
-            var interval = Interval(domain, 1);
-            if (interval.T0 != 0 || interval.T1 != 1)
-            {
-                var curve = new LineCurve(line, interval.T0, interval.T1);
-                if (curve.IsValid && curve.Domain == interval)
-                    return new GH_Curve(curve);
-                curve.Dispose();
-                throw CollectionFormatException.At("PARAMETERIZATION_UNSUPPORTED",
-                    "Rhino could not reconstruct the line's original domain.", "domain");
-            }
-        }
-        return new GH_Line(line);
+        var interval = ReadDomain(item, new Interval(0, 1));
+        if (interval.T0 == 0 && interval.T1 == 1)
+            return new GH_Line(line);
+        var curve = new LineCurve(line, interval.T0, interval.T1);
+        if (curve.IsValid && curve.Domain == interval)
+            return new GH_Curve(curve);
+        curve.Dispose();
+        throw CollectionFormatException.At("PARAMETERIZATION_UNSUPPORTED",
+            "Rhino could not reconstruct the line's original domain.", "domain");
     }
 
     private static GH_Curve DecodePolyline(JsonElement item, double scale)
@@ -295,7 +285,7 @@ internal static class GeometryCollectionConverter
         var curve = new PolylineCurve(points);
         try
         {
-            var interval = item.TryGetProperty("domain", out var domain) ? Interval(domain, 1) : new Interval(0, points.Count - 1);
+            var interval = ReadDomain(item, new Interval(0, points.Count - 1));
             curve.Domain = interval;
             if (curve.Domain != interval || curve.IsClosed != closed
                 || !curve.TryGetPolyline(out var reconstructed, out var parameters)
@@ -365,6 +355,9 @@ internal static class GeometryCollectionConverter
         return point.IsValid ? point : throw CollectionFormatException.At("PRECISION_LOSS", "The target Rhino coordinates are invalid.");
     }
     private static Vector3d Vector(JsonElement value) => new(value[0].GetDouble(), value[1].GetDouble(), value[2].GetDouble());
+    private static Interval ReadDomain(JsonElement value, Interval fallback) =>
+        value.TryGetProperty("domain", out var domain) ? Interval(domain, 1) : fallback;
+
     private static Interval Interval(JsonElement value, double scale)
     {
         var a = Scale(value[0].GetDouble(), scale);

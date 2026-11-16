@@ -52,11 +52,15 @@ internal static partial class AlidadeClient
         }
     }
 
-    public static async Task<ProjectStatus> ReadProjectAsync(HttpRequestMessage request, CancellationToken cancellation)
+    internal static async Task<ProjectStatus> ReadProjectAsync(ProjectSession project, ulong documentId, CancellationToken cancellation)
     {
         try
         {
-            return (await SendAsync<ProjectResponse>(request, cancellation).ConfigureAwait(false)).Status();
+            using var request = project.Request(documentId, HttpMethod.Get, "/v1/project");
+            var status = (await SendAsync<ProjectResponse>(request, cancellation).ConfigureAwait(false)).Status();
+            if (!project.Status.Matches(status.ProjectId, status.InstanceId))
+                throw new AlidadeConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
+            return status;
         }
         catch (JsonException)
         {
@@ -64,9 +68,9 @@ internal static partial class AlidadeClient
         }
     }
 
-    private static async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken cancellation)
+    private static async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken cancellation, int timeoutSeconds = 15)
     {
-        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation).ConfigureAwait(false);
+        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation, timeoutSeconds).ConfigureAwait(false);
         return await ReadJsonAsync<T>(response, cancellation).ConfigureAwait(false);
     }
 
@@ -115,7 +119,6 @@ internal static partial class AlidadeClient
         "PAIRING_REQUIRED" => "Pair with the project again.",
         "PROJECT_BUSY" => "The Torquetum project is busy. Try again when it is ready.",
         "READ_ONLY" => "This project currently accepts only read access.",
-        "PROJECT_NOT_READY" => "The Torquetum project is still opening.",
         "PROJECT_SYNC_PENDING" => "Wait for the Torquetum project to finish synchronizing.",
         "VERSION_UNSUPPORTED" => "The Torquetum instance uses an incompatible Alidade version.",
         "CAPACITY_EXCEEDED" => "Torquetum is handling other requests. Try again.",
@@ -130,7 +133,6 @@ internal static partial class AlidadeClient
         "CONTENT_TOO_LARGE" => "The collection exceeds the Torquetum transfer limit.",
         "INVALID_GEOMETRY" => "Torquetum rejected geometry in the collection.",
         "UNSUPPORTED_GEOMETRY" => "This collection contains geometry Torquetum cannot exchange.",
-        "INVALID_STEP" => "Torquetum rejected a STEP item.",
         "EXACT_CURVE_UNAVAILABLE" => "Torquetum cannot preserve the parameterization of this curve.",
         "INVALID_REQUEST" => "Torquetum rejected the request fields.",
         "UNSUPPORTED_MEDIA_TYPE" => "Torquetum cannot read this exchange format.",

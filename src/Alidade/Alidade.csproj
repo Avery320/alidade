@@ -21,7 +21,8 @@
                HintPath="$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net48)/build/.NETFramework/v4.8/System.Windows.Forms.dll"
                Private="false" />
     <PackageReference Include="System.Drawing.Common" Version="7.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
-    <PackageReference Include="Grasshopper" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" NoWarn="NU1701" />
-    <PackageReference Include="RhinoCommon" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" NoWarn="NU1701" />
+    <PackageReference Include="Grasshopper" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" PrivateAssets="all" NoWarn="NU1701" />
+    <PackageReference Include="RhinoCommon" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" PrivateAssets="all" NoWarn="NU1701" />
+    <InternalsVisibleTo Include="Alidade.Checks" />
   </ItemGroup>
 </Project>

@@ -8,6 +8,7 @@
     <GrasshopperResources Condition="'$(GrasshopperResources)' == ''">$(RhinoResources)/ManagedPlugIns/GrasshopperPlugin.rhp</GrasshopperResources>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Alidade/Alidade.csproj" Private="false" />
     <Reference Include="RhinoCommon" HintPath="$(RhinoResources)/RhinoCommon.dll" />
     <Reference Include="Grasshopper" HintPath="$(GrasshopperResources)/Grasshopper.dll" />
     <Reference Include="GH_IO" HintPath="$(GrasshopperResources)/GH_IO.dll" />

@@ -63,9 +63,8 @@ internal static class RhinoStepGeometry
         var shape = copy ?? (Brep)input;
         Scale(shape, metresPerUnit);
         var type = ShapeType(shape);
-        return InTemporaryFile(path =>
+        return InTemporaryModel(toleranceMetres, (document, path) =>
         {
-            using var document = Headless(toleranceMetres);
             if (document.Objects.AddBrep(shape) == Guid.Empty ||
                 !FileStp.Write(path, document, new FileStpWriteOptions
                 {
@@ -85,10 +84,9 @@ internal static class RhinoStepGeometry
 
     internal static Brep Decode(string expectedType, string text, double targetUnitsPerMetre, double toleranceMetres)
     {
-        return InTemporaryFile(path =>
+        return InTemporaryModel(toleranceMetres, (document, path) =>
         {
             File.WriteAllText(path, text, StepText.Utf8);
-            using var document = Headless(toleranceMetres);
             if (!FileStp.Read(path, document, new FileStpReadOptions { JoinSurfaces = true }))
                 throw CollectionFormatException.At("STEP_IMPORT_FAILED", "Rhino could not open this STEP item.", "step");
 
@@ -126,24 +124,6 @@ internal static class RhinoStepGeometry
         catch (CollectionFormatException) { return MinimumToleranceMetres; }
     }
 
-    private static RhinoDoc Headless(double toleranceMetres)
-    {
-        var document = RhinoDoc.CreateHeadless(null);
-        if (document == null)
-            throw CollectionFormatException.At("STEP_UNAVAILABLE", "Rhino could not open an isolated document for STEP exchange.");
-        try
-        {
-            document.ModelUnitSystem = UnitSystem.Meters;
-            document.ModelAbsoluteTolerance = toleranceMetres;
-            return document;
-        }
-        catch
-        {
-            document.Dispose();
-            throw;
-        }
-    }
-
     private static Brep DuplicateBrep(GeometryBase? shape) => (shape switch
     {
         Brep brep => brep.DuplicateBrep(),
@@ -173,12 +153,19 @@ internal static class RhinoStepGeometry
             throw CollectionFormatException.At("PRECISION_LOSS", "Rhino could not retain a valid shape after converting units.");
     }
 
-    private static T InTemporaryFile<T>(Func<string, T> run)
+    private static T InTemporaryModel<T>(double toleranceMetres, Func<RhinoDoc, string, T> run)
     {
         try
         {
             var directory = Directory.CreateTempSubdirectory("alidade-step-");
-            try { return run(Path.Combine(directory.FullName, "Alidade.stp")); }
+            try
+            {
+                using var document = RhinoDoc.CreateHeadless(null)
+                    ?? throw CollectionFormatException.At("STEP_UNAVAILABLE", "Rhino could not open an isolated document for STEP exchange.");
+                document.ModelUnitSystem = UnitSystem.Meters;
+                document.ModelAbsoluteTolerance = toleranceMetres;
+                return run(document, Path.Combine(directory.FullName, "Alidade.stp"));
+            }
             finally { directory.Delete(recursive: true); }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or EncoderFallbackException or DecoderFallbackException)

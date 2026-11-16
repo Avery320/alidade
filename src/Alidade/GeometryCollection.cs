@@ -47,12 +47,7 @@ public sealed class GeometryCollection
 
     public override string ToString() => $"{BranchCount} branches, {SlotCount} slots, {GeometryCount} geometries";
 
-    public static GeometryCollection Parse(JsonElement payload) => Validate(payload, copy: true);
-
-    // Serializer-produced elements own their storage. Elements from a caller's JsonDocument may be borrowed.
-    internal static GeometryCollection FromOwnedPayload(JsonElement payload) => Validate(payload, copy: false);
-
-    private static GeometryCollection Validate(JsonElement payload, bool copy)
+    internal static GeometryCollection FromOwnedPayload(JsonElement payload)
     {
         Fields(payload, new[] { "schemaVersion", "units", "space", "branches" });
         var schemaVersion = Integer(payload.GetProperty("schemaVersion"), "schemaVersion");
@@ -60,9 +55,10 @@ public sealed class GeometryCollection
             || Text(payload.GetProperty("space"), "space") != "project")
             throw Invalid("Expected a supported collection in Project metres.");
 
-        var paths = new HashSet<string>(StringComparer.Ordinal);
         var keys = new HashSet<string>(StringComparer.Ordinal);
-        var branches = new List<(int[] Path, JsonElement Value)>();
+        var comparePaths = Comparer<int[]>.Create((left, right) => left.AsSpan().SequenceCompareTo(right));
+        var branches = new SortedDictionary<int[], JsonElement>(comparePaths);
+        var previousPath = Array.Empty<int>();
         var outOfOrder = false;
         var slots = 0;
         var geometryCount = 0;
@@ -70,11 +66,11 @@ public sealed class GeometryCollection
         {
             Fields(branch, new[] { "path", "items" });
             var path = Elements(branch.GetProperty("path"), "path", 1).Select(value => Integer(value, "path")).ToArray();
-            if (!paths.Add(string.Join(";", path)))
+            if (!branches.TryAdd(path, branch))
                 throw new CollectionFormatException(new("INVALID_COLLECTION", "Duplicate branch path.", path, Field: "path"));
 
-            outOfOrder |= branches.Count > 0 && branches[^1].Path.AsSpan().SequenceCompareTo(path) > 0;
-            branches.Add((path, branch));
+            outOfOrder |= comparePaths.Compare(previousPath, path) > 0;
+            previousPath = path;
             var index = 0;
             foreach (var item in Elements(branch.GetProperty("items"), "items"))
             {
@@ -102,12 +98,7 @@ public sealed class GeometryCollection
         }
 
         if (outOfOrder)
-        {
-            branches.Sort((left, right) => left.Path.AsSpan().SequenceCompareTo(right.Path));
-            payload = Snapshot(branches.Select(branch => branch.Value), schemaVersion);
-        }
-        else if (copy)
-            payload = payload.Clone();
+            payload = Snapshot(branches.Values, schemaVersion);
         return new GeometryCollection(payload, schemaVersion, branches.Count, slots, geometryCount);
     }
 

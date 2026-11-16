@@ -50,9 +50,9 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
         string status;
         var byId = Params.Input[1].VolatileDataCount != 0 || Params.Input[1].SourceCount != 0;
         string? portId = null;
-        if (byId && Params.Input[1].VolatileDataCount == 1)
-            data.GetData(1, ref portId);
-        else if (!byId && project != null && _selectedInstance == project.Status.InstanceId)
+        if (byId)
+            portId = SingleInput<string>(data, 1);
+        else if (project != null && _selectedInstance == project.Status.InstanceId)
             portId = _selection;
 
         if (project == null) status = "Connect to Torquetum first.";
@@ -71,16 +71,14 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
                 status = $"{item.Name} ({item.Direction})";
             }
         }
-        Message = status;
-        data.SetData(1, status);
-        if (_error != null) AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, _error);
+        ReportStatus(data, 1, status, _error);
     }
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
     {
         base.AppendAdditionalComponentMenuItems(menu);
         var document = OnPingDocument();
-        var enabled = CanUse(document) && document != null && _project?.IsValidFor(document.RuntimeID) == true && !IsPending;
+        var enabled = !IsPending && CanUseProject(document, _project);
         Menu_AppendItem(menu, "Refresh list", (_, _) => LoadList(), enabled);
         if (!enabled || _items == null || _project is not { } project
             || Params.Input[1].SourceCount != 0 || Params.Input[1].VolatileDataCount != 0)
@@ -99,7 +97,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     private void Select(ProjectSession project, string id)
     {
         var document = OnPingDocument();
-        if (document == null || !CanUse(document) || !ReferenceEquals(_project, project) || !project.IsValidFor(document.RuntimeID))
+        if (!ReferenceEquals(_project, project) || !CanUseProject(document, project))
             return;
         _selection = id;
         _selectedInstance = project.Status.InstanceId;
@@ -109,8 +107,8 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     private void LoadList()
     {
         var document = OnPingDocument();
-        if (document == null || !CanUse(document) || IsPending || _project is not { } project
-            || !project.IsValidFor(document.RuntimeID))
+        var project = _project;
+        if (IsPending || !CanUseProject(document, project))
             return;
         _error = null;
         _items = null;

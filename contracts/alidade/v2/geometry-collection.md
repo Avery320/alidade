@@ -1,7 +1,0 @@
-# Alidade geometry collection v2
-
-The v2 collection adds one exact geometry kind to the v1 tree. The envelope still uses Project space, metres, ordered branch paths and positional item slots. A STEP item has `kind: "brep-step"`, `shapeType: "face" | "shell" | "solid"`, `step` with a STEP Part 21 string, and an optional `itemKey`. See the [schema](geometry-collection.schema.json), [synthetic fixture](fixtures/geometry-collection.json) and [pairing and write contract](../v1/connection.md).
-
-Each STEP item carries one connected shape. One trimmed face, including a one-face open shell representation, is a `face`. A connected multi-face open shell or closed shell without a solid is a `shell`. A connected native solid is a `solid`. The receiver validates the native shape against `shapeType`. Unsupported STEP entities, multiple bodies and class mismatches reject the operation with the item path and slot. Native exchange accounts for the STEP file's declared length units and keeps the Project Z-up frame.
-
-Torquetum stores the exact STEP source with the normal Geometry asset. An unchanged STEP item can return the stored text. A placed or generated shape uses the native STEP writer. The view uses a tessellation, while downstream exact operations rebuild the native shape. Standalone exact curves, assembly metadata, material and layer metadata are outside this version. Unsupported items return a diagnostic and preserve their tree location.

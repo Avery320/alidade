@@ -1,11 +1,8 @@
 using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Threading;
-using System.Threading.Tasks;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
-using GH_IO.Serialization;
 
 namespace Torquetum.Alidade;
 
@@ -14,6 +11,7 @@ internal sealed record ProjectStatus(
     string? AvailabilityReason, bool SupportsStep, int MaxBodyBytes)
 {
     internal bool SupportsCollection(int version) => version == 1 || (version == 2 && SupportsStep);
+    internal bool Matches(string projectId, Guid instanceId) => ProjectId == projectId && InstanceId == instanceId;
 }
 
 public sealed class ProjectSession
@@ -48,18 +46,9 @@ public sealed class ProjectSession
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return request;
     }
-
-    internal async Task<ProjectStatus> RefreshAsync(ulong documentId, CancellationToken cancellation)
-    {
-        using var request = Request(documentId, HttpMethod.Get, "/v1/project");
-        var status = await AlidadeClient.ReadProjectAsync(request, cancellation).ConfigureAwait(false);
-        if (status.InstanceId != Status.InstanceId || status.ProjectId != Status.ProjectId)
-            throw new AlidadeConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
-        return status;
-    }
 }
 
-public sealed class AlidadeProject : GH_Goo<ProjectSession?>
+public sealed class AlidadeProject : AlidadeLiveValue<ProjectSession>
 {
     public AlidadeProject() { }
     internal AlidadeProject(ProjectSession? session) : base(session) { }
@@ -70,14 +59,6 @@ public sealed class AlidadeProject : GH_Goo<ProjectSession?>
     public override IGH_Goo Duplicate() => new AlidadeProject(Value);
     public override object ScriptVariable() => ToString();
     public override string ToString() => IsValid && Value is { } session ? session.Status.ProjectName : "Disconnected Alidade project";
-
-    // Sessions are ephemeral even when the Goo is internalized in a parameter.
-    public override bool Write(GH_IWriter writer) => true;
-    public override bool Read(GH_IReader reader)
-    {
-        Value = null;
-        return true;
-    }
 }
 
 public sealed class AlidadeProjectParameter : GH_Param<AlidadeProject>

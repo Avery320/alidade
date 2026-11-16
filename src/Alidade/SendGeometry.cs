@@ -91,9 +91,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         else
             status = _problem ?? _ready;
 
-        Message = status;
-        data.SetData(2, status);
-        if (error != null) AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, error);
+        ReportStatus(data, 2, status, error);
     }
 
     private Inputs? Capture(IGH_DataAccess data, ProjectSession? project)
@@ -103,17 +101,13 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             _ready = "Connect to Torquetum first.";
             return null;
         }
-        AlidadeCollection? wrapped = null;
-        if (Params.Input[1].VolatileDataCount != 1 || !data.GetData(1, ref wrapped)
-            || wrapped?.Value is not { GeometryCount: > 0 } collection)
+        if (SingleInput<AlidadeCollection>(data, 1)?.Value is not { GeometryCount: > 0 } collection)
         {
             _ready = "Connect one nonempty Geometry Collection.";
             return null;
         }
 
-        AlidadePortReference? target = null;
-        if (Params.Input[2].VolatileDataCount != 1 || !data.GetData(2, ref target)
-            || target?.Value is not { Direction: "input" } reference || !reference.Matches(project))
+        if (ConnectedPort(data, 2, project, "input") is not { } reference)
         {
             _ready = "Select an Asterism input in the connected project.";
             return null;
@@ -131,7 +125,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     {
         base.AppendAdditionalComponentMenuItems(menu);
         var document = OnPingDocument();
-        var enabled = !IsPending && CanUse(document) && document != null && _project?.IsValidFor(document.RuntimeID) == true;
+        var enabled = !IsPending && CanUseProject(document, _project);
         Menu_AppendItem(menu, "Send", (_, _) => Begin(), enabled && CanStart());
         Menu_AppendItem(menu, "Check result", (_, _) => Continue(check: true), enabled && CanContinue(check: true));
         Menu_AppendItem(menu, "Retry same request", (_, _) => Continue(check: false), enabled && CanContinue(check: false));
@@ -148,8 +142,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     private void Begin()
     {
         var document = OnPingDocument();
-        if (document == null || !CanUse(document) || IsPending || !CanStart() || _inputs is not { } input
-            || !input.Project.IsValidFor(document.RuntimeID))
+        if (IsPending || !CanStart() || _inputs is not { } input || !CanUseProject(document, input.Project))
             return;
 
         try
@@ -171,8 +164,8 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     private void Continue(bool check)
     {
         var document = OnPingDocument();
-        if (document == null || !CanUse(document) || IsPending || !CanContinue(check)
-            || _attempt is not { } attempt || !attempt.Inputs.Project.IsValidFor(document.RuntimeID))
+        if (IsPending || !CanContinue(check) || _attempt is not { } attempt
+            || !CanUseProject(document, attempt.Inputs.Project))
             return;
 
         Execute(document, attempt, check);
@@ -208,7 +201,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             return;
         }
 
-        if (error.Code is "PROJECT_BUSY" or "CAPACITY_EXCEEDED" or "PROJECT_SYNC_PENDING" or "PROJECT_NOT_READY")
+        if (error.Code is "PROJECT_BUSY" or "CAPACITY_EXCEEDED" or "PROJECT_SYNC_PENDING")
         {
             // These replies are sent before a write is admitted. Its immutable envelope can be retried.
             attempt.CanStartAnother = true;

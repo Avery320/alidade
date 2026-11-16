@@ -60,11 +60,9 @@ Intel Mac 使用 Rhino 目錄中的 `x86_64` 執行環境，Apple Silicon 使用
 
 ## 交換契約
 
-`contracts/alidade/v1` 包含 Alidade v1 的 [JSON Schema](contracts/alidade/v1/geometry-collection.schema.json) 與[合成測試資料](contracts/alidade/v1/fixtures/geometry-collection.json)，可在本機獨立使用。這兩個檔案原樣取自 Torquetum 的契約提交 `5a425a104dc6ba5978412d23e962999027f6cf11`。更新時先修改來源，再同步同版測試資料。
+配對、交易、版本協商與 JSON Schema 由 Torquetum 的 `contracts/alidade` 維護。 [Torquetum 交換契約](https://github.com/Avery320/torquetum/pull/26/files)
 
-[連線與交換契約](contracts/alidade/v1/connection.md)包含本機配對、交易與 v2 版本協商。[合成連線資料](contracts/alidade/v1/fixtures/connection.json)取自 `fe64200`。
-
-[v2 幾何規格](contracts/alidade/v2/geometry-collection.md)、[Schema](contracts/alidade/v2/geometry-collection.schema.json) 與[合成 STEP 測試資料](contracts/alidade/v2/fixtures/geometry-collection.json)與 Torquetum 共用。
+本機驗收使用同版的 [v1 幾何測試資料](contracts/alidade/v1/fixtures/geometry-collection.json)與 [v2 STEP 測試資料](contracts/alidade/v2/fixtures/geometry-collection.json)。
 
 ## 授權
 

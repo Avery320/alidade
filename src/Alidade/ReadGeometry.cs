@@ -36,10 +36,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
     {
         var document = OnPingDocument();
         var project = ConnectedProject(data, document);
-        AlidadePortReference? reference = null;
-        data.GetData(1, ref reference);
-        var next = project != null && Params.Input[1].VolatileDataCount == 1
-            && reference?.Value is { Direction: "output" } target && target.Matches(project)
+        var next = project != null && ConnectedPort(data, 1, project, "output") is { } target
             ? new Input(project, target) : null;
         if (_input != next)
         {
@@ -57,24 +54,20 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
         }
         var status = _error ?? (IsPending ? "Reading geometry…" : _input?.Target.Name
             ?? (project == null ? "Connect to Torquetum first." : "Select an Asterism output in the connected project."));
-        Message = status;
-        data.SetData(2, status);
-        if (_error != null) AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, _error);
+        ReportStatus(data, 2, status, _error);
     }
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
     {
         base.AppendAdditionalComponentMenuItems(menu);
         var document = OnPingDocument();
-        Menu_AppendItem(menu, "Refresh read", (_, _) => Refresh(), !IsPending && CanUse(document)
-            && document != null && _input?.Project.IsValidFor(document.RuntimeID) == true);
+        Menu_AppendItem(menu, "Refresh read", (_, _) => Refresh(), !IsPending && CanUseProject(document, _input?.Project));
     }
 
     private void Refresh()
     {
         var document = OnPingDocument();
-        if (document == null || !CanUse(document) || IsPending || _input is not { } input
-            || !input.Project.IsValidFor(document.RuntimeID))
+        if (IsPending || _input is not { } input || !CanUseProject(document, input.Project))
             return;
 
         _collection = null;

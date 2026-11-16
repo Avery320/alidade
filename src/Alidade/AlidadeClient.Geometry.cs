@@ -62,12 +62,10 @@ internal static partial class AlidadeClient
     internal static async Task<GeometryCollection> ReadGeometryAsync(ProjectSession project, ulong documentId,
         GeometryPortReference target, CancellationToken cancellation)
     {
-        if (target.Direction != "output" || !target.Matches(project))
+        if (!target.Matches(project, "output"))
             throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
         using var request = project.Request(documentId, HttpMethod.Get, PortRoute("outputs", target.PortId));
-        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation, timeoutSeconds: 60)
-            .ConfigureAwait(false);
-        var payload = await ReadJsonAsync<JsonElement>(response, cancellation).ConfigureAwait(false);
+        var payload = await SendAsync<JsonElement>(request, cancellation, timeoutSeconds: 60).ConfigureAwait(false);
         var collection = GeometryCollection.FromOwnedPayload(payload);
         if (!project.Status.SupportsCollection(collection.SchemaVersion))
             throw new AlidadeConnectionException("The paired project did not negotiate this collection format.");
@@ -94,7 +92,7 @@ internal static partial class AlidadeClient
     {
         if (!project.IsValidFor(documentId))
             throw new AlidadeConnectionException(ErrorMessage("PAIRING_REQUIRED"), pairingRequired: true);
-        if (!write.Target.Matches(project))
+        if (!write.Target.Matches(project, "input"))
             throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
         if (!project.Status.SupportsCollection(write.SchemaVersion))
             throw new AlidadeConnectionException("The paired project does not offer precise STEP exchange.");

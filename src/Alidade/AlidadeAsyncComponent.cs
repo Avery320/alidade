@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -17,13 +18,29 @@ public abstract class AlidadeAsyncComponent : GH_Component
         : base(name, nickname, description, "Alidade", category) { }
 
     protected bool IsPending => _operation != null;
-    protected bool CanUse(GH_Document? document) => document?.Enabled == true && !Locked;
+    protected bool CanUse([NotNullWhen(true)] GH_Document? document) => document?.Enabled == true && !Locked;
 
-    protected ProjectSession? ConnectedProject(IGH_DataAccess data, GH_Document? document)
+    protected bool CanUseProject([NotNullWhen(true)] GH_Document? document,
+        [NotNullWhen(true)] ProjectSession? project) => CanUse(document) && project?.IsValidFor(document.RuntimeID) == true;
+
+    protected T? SingleInput<T>(IGH_DataAccess data, int index) where T : class
     {
-        AlidadeProject? value = null;
-        return document != null && Params.Input[0].VolatileDataCount == 1 && data.GetData(0, ref value)
-            && value?.Value is { } session && session.IsValidFor(document.RuntimeID) ? session : null;
+        T? value = null;
+        return Params.Input[index].VolatileDataCount == 1 && data.GetData(index, ref value) ? value : null;
+    }
+
+    protected ProjectSession? ConnectedProject(IGH_DataAccess data, GH_Document? document) =>
+        document != null && SingleInput<AlidadeProject>(data, 0)?.Value is { } session
+            && session.IsValidFor(document.RuntimeID) ? session : null;
+
+    protected GeometryPortReference? ConnectedPort(IGH_DataAccess data, int index, ProjectSession project, string direction) =>
+        SingleInput<AlidadePortReference>(data, index)?.Value is { } port && port.Matches(project, direction) ? port : null;
+
+    protected void ReportStatus(IGH_DataAccess data, int index, string status, string? warning)
+    {
+        Message = status;
+        data.SetData(index, status);
+        if (warning != null) AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
     }
 
     internal void StartRequest<T>(GH_Document document, ProjectSession? project, Func<CancellationToken, Task<T>> request,
@@ -32,7 +49,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
         CancelRequest();
         var operation = new CancellationTokenSource();
         _operation = operation;
-        RequestSolution(document);
+        if (document.SolutionDepth == 0) RequestSolution(document);
         _ = CompleteAsync(document, project, operation, request, accept, fail, abandon);
     }
 

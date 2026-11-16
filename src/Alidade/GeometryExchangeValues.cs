@@ -5,10 +5,22 @@ using GH_IO.Serialization;
 
 namespace Torquetum.Alidade;
 
+public abstract class AlidadeLiveValue<T> : GH_Goo<T?> where T : class
+{
+    protected AlidadeLiveValue(T? value = null) : base(value) { }
+
+    public sealed override bool Write(GH_IWriter writer) => true;
+    public sealed override bool Read(GH_IReader reader)
+    {
+        Value = null;
+        return true;
+    }
+}
+
 public sealed record GeometryPortReference(string ProjectId, Guid InstanceId, string PortId, string Name, string Direction, string? ETag)
 {
-    internal bool Matches(ProjectSession session) =>
-        InstanceId != Guid.Empty && session.Status.InstanceId == InstanceId && session.Status.ProjectId == ProjectId;
+    internal bool Matches(ProjectSession session, string direction) => Direction == direction
+        && InstanceId != Guid.Empty && session.Status.Matches(ProjectId, InstanceId);
 }
 
 public sealed record GeometryReceipt(Guid RequestId, string ProjectId, Guid InstanceId, string State,
@@ -22,7 +34,7 @@ public sealed record GeometryReceipt(Guid RequestId, string ProjectId, Guid Inst
         $"{RequestId:D} · {State} · Project {InstanceId:D}" + (PortId == null ? "" : $" · {PortId} · {ETag}");
 }
 
-public sealed class AlidadePortReference : GH_Goo<GeometryPortReference?>
+public sealed class AlidadePortReference : AlidadeLiveValue<GeometryPortReference>
 {
     public AlidadePortReference() { }
     internal AlidadePortReference(GeometryPortReference? target) : base(target) { }
@@ -32,13 +44,6 @@ public sealed class AlidadePortReference : GH_Goo<GeometryPortReference?>
     public override string TypeDescription => "An Asterism input or output in a live Torquetum project.";
     public override IGH_Goo Duplicate() => new AlidadePortReference(Value);
     public override string ToString() => Value?.Name ?? "No port selected";
-
-    public override bool Write(GH_IWriter writer) => true;
-    public override bool Read(GH_IReader reader)
-    {
-        Value = null;
-        return true;
-    }
 }
 
 public sealed class AlidadePortReferenceParameter : GH_Param<AlidadePortReference>
@@ -50,7 +55,7 @@ public sealed class AlidadePortReferenceParameter : GH_Param<AlidadePortReferenc
     public override GH_Exposure Exposure => GH_Exposure.hidden;
 }
 
-public sealed class AlidadeWriteReceipt : GH_Goo<GeometryReceipt?>
+public sealed class AlidadeWriteReceipt : AlidadeLiveValue<GeometryReceipt>
 {
     public AlidadeWriteReceipt() { }
     internal AlidadeWriteReceipt(GeometryReceipt? receipt) : base(receipt) { }
@@ -60,13 +65,6 @@ public sealed class AlidadeWriteReceipt : GH_Goo<GeometryReceipt?>
     public override string TypeDescription => "The outcome of a send to an Asterism input.";
     public override IGH_Goo Duplicate() => new AlidadeWriteReceipt(Value);
     public override string ToString() => Value?.ToString() ?? "No receipt";
-
-    public override bool Write(GH_IWriter writer) => true;
-    public override bool Read(GH_IReader reader)
-    {
-        Value = null;
-        return true;
-    }
 }
 
 public sealed class AlidadeWriteReceiptParameter : GH_Param<AlidadeWriteReceipt>
