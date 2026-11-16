@@ -30,13 +30,14 @@ public sealed class GeometryCollection
     internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     private const double MinimumPlaneAxis = 1e-9;
 
-    private GeometryCollection(JsonElement payload, int schemaVersion, int branchCount, int count, int geometryCount)
+    private GeometryCollection(JsonElement payload, int schemaVersion, int branchCount, int count, int geometryCount, bool hasNames)
     {
         Payload = payload;
         SchemaVersion = schemaVersion;
         BranchCount = branchCount;
         SlotCount = count;
         GeometryCount = geometryCount;
+        HasNames = hasNames;
     }
 
     public JsonElement Payload { get; }
@@ -44,6 +45,7 @@ public sealed class GeometryCollection
     public int BranchCount { get; }
     public int SlotCount { get; }
     public int GeometryCount { get; }
+    internal bool HasNames { get; }
 
     public override string ToString() => $"{BranchCount} branches, {SlotCount} slots, {GeometryCount} geometries";
 
@@ -62,6 +64,7 @@ public sealed class GeometryCollection
         var outOfOrder = false;
         var slots = 0;
         var geometryCount = 0;
+        var hasNames = false;
         foreach (var branch in Elements(payload.GetProperty("branches"), "branches"))
         {
             Fields(branch, new[] { "path", "items" });
@@ -82,8 +85,16 @@ public sealed class GeometryCollection
                         if (item.TryGetProperty("itemKey", out var keyValue))
                         {
                             var key = Text(keyValue, "itemKey");
-                            if (string.IsNullOrWhiteSpace(key) || !keys.Add(key))
-                                throw Invalid("Item keys must be nonblank and unique within a collection.", "itemKey");
+                            if (string.IsNullOrWhiteSpace(key))
+                                throw CollectionFormatException.At("INVALID_ITEM_KEY", "A Geometry ID cannot be blank.", "itemKey");
+                            if (!keys.Add(key))
+                                throw CollectionFormatException.At("DUPLICATE_ITEM_KEY", "Geometry IDs must be unique within a collection.", "itemKey");
+                        }
+                        if (item.TryGetProperty("name", out var name))
+                        {
+                            if (name.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(name.GetString()))
+                                throw CollectionFormatException.At("INVALID_ITEM_NAME", "A Geometry Name must be a nonblank string.", "name");
+                            hasNames = true;
                         }
                         geometryCount++;
                     }
@@ -99,7 +110,7 @@ public sealed class GeometryCollection
 
         if (outOfOrder)
             payload = Snapshot(branches.Values, schemaVersion);
-        return new GeometryCollection(payload, schemaVersion, branches.Count, slots, geometryCount);
+        return new GeometryCollection(payload, schemaVersion, branches.Count, slots, geometryCount, hasNames);
     }
 
     internal static JsonElement Snapshot<T>(IEnumerable<T> branches, int schemaVersion) => JsonSerializer.SerializeToElement(
@@ -112,26 +123,26 @@ public sealed class GeometryCollection
         switch (Text(value, "kind"))
         {
             case "point":
-                Fields(item, new[] { "kind", "position" }, "itemKey");
+                Fields(item, new[] { "kind", "position" }, "itemKey", "name");
                 Coordinates(item.GetProperty("position"), "position");
                 break;
             case "line":
-                Fields(item, new[] { "kind", "start", "end" }, "itemKey", "domain");
+                Fields(item, new[] { "kind", "start", "end" }, "itemKey", "name", "domain");
                 if (Coordinates(item.GetProperty("start"), "start") == Coordinates(item.GetProperty("end"), "end"))
                     throw Invalid("A line's endpoints must differ.", "end");
                 CheckDomain(item);
                 break;
             case "polyline":
-                Fields(item, new[] { "kind", "points", "closed" }, "itemKey", "domain");
+                Fields(item, new[] { "kind", "points", "closed" }, "itemKey", "name", "domain");
                 CheckPolyline(item);
                 CheckDomain(item);
                 break;
             case "plane":
-                Fields(item, new[] { "kind", "origin", "normal", "direction" }, "itemKey");
+                Fields(item, new[] { "kind", "origin", "normal", "direction" }, "itemKey", "name");
                 CheckPlane(item);
                 break;
             case "box":
-                Fields(item, new[] { "kind", "plane", "x", "y", "z" }, "itemKey");
+                Fields(item, new[] { "kind", "plane", "x", "y", "z" }, "itemKey", "name");
                 var plane = item.GetProperty("plane");
                 Fields(plane, new[] { "origin", "normal", "direction" });
                 CheckPlane(plane);
@@ -139,11 +150,11 @@ public sealed class GeometryCollection
                     Interval(item.GetProperty(axis), axis);
                 break;
             case "triangle-mesh":
-                Fields(item, new[] { "kind", "positions", "triangles" }, "itemKey");
+                Fields(item, new[] { "kind", "positions", "triangles" }, "itemKey", "name");
                 CheckMesh(item);
                 break;
             case "brep-step" when schemaVersion == 2:
-                Fields(item, new[] { "kind", "shapeType", "step" }, "itemKey");
+                Fields(item, new[] { "kind", "shapeType", "step" }, "itemKey", "name");
                 if (Text(item.GetProperty("shapeType"), "shapeType") is not ("face" or "shell" or "solid"))
                     throw Invalid("Declare a STEP face, shell or solid.", "shapeType");
                 if (!StepText.IsPart21(Text(item.GetProperty("step"), "step")))

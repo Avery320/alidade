@@ -19,6 +19,10 @@ public abstract class AlidadeLiveValue<T> : GH_Goo<T?> where T : class
 
 public sealed record GeometryPortReference(string ProjectId, Guid InstanceId, string PortId, string Name, string Direction, string? ETag)
 {
+    internal string DisplayName => Display(Name, PortId);
+
+    internal static string Display(string name, string id) => $"{name} [{(id.Length > 8 ? id[^8..] : id)}]";
+
     internal bool Matches(ProjectSession session, string direction) => Direction == direction
         && InstanceId != Guid.Empty && session.Status.Matches(ProjectId, InstanceId);
 }
@@ -26,6 +30,8 @@ public sealed record GeometryPortReference(string ProjectId, Guid InstanceId, st
 public sealed record GeometryReceipt(Guid RequestId, string ProjectId, Guid InstanceId, string State,
     string? PortId, string? ETag, string Message, DateTimeOffset? RetryAfter)
 {
+    internal bool Matches(ProjectSession session) => RequestId != Guid.Empty && session.Status.Matches(ProjectId, InstanceId);
+
     internal static GeometryReceipt Pending(Guid requestId, ProjectStatus project, DateTimeOffset? retryAfter = null) =>
         new(requestId, project.ProjectId, project.InstanceId, "pending", null, null,
             "The result is pending. Use Check result.", retryAfter);
@@ -43,7 +49,7 @@ public sealed class AlidadePortReference : AlidadeLiveValue<GeometryPortReferenc
     public override string TypeName => "Alidade Port Reference";
     public override string TypeDescription => "An Asterism input or output in a live Torquetum project.";
     public override IGH_Goo Duplicate() => new AlidadePortReference(Value);
-    public override string ToString() => Value?.Name ?? "No port selected";
+    public override string ToString() => Value?.DisplayName ?? "No port selected";
 }
 
 public sealed class AlidadePortReferenceParameter : GH_Param<AlidadePortReference>

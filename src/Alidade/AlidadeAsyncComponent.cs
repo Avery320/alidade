@@ -168,3 +168,14 @@ public abstract class AlidadeAsyncComponent : GH_Component
         base.DocumentContextChanged(document, context);
     }
 }
+
+internal static class ComponentArchive
+{
+    internal static void RestoreAppendedParameter(GH_IReader reader, IGH_Param parameter, int index, bool input)
+    {
+        // Grasshopper treats missing parameter chunks as corruption, including ports added after this archive.
+        var name = input ? "param_input" : "param_output";
+        if (reader.FindChunk(name, index) == null && reader is GH_IWriter archive)
+            parameter.Write(archive.CreateChunk(name, index));
+    }
+}

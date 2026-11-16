@@ -15,7 +15,7 @@ internal sealed record GeometryPort(string Id, string Name, string Direction, st
         new(status.ProjectId, status.InstanceId, Id, Name, Direction, ETag);
 }
 
-internal sealed record GeometryWriteRequest(Guid Id, GeometryPortReference Target, int SchemaVersion, ReadOnlyMemory<byte> Payload);
+internal sealed record GeometryWriteRequest(Guid Id, GeometryPortReference Target, int SchemaVersion, bool HasNames, ReadOnlyMemory<byte> Payload);
 
 internal static partial class AlidadeClient
 {
@@ -60,12 +60,23 @@ internal static partial class AlidadeClient
     }
 
     internal static async Task<GeometryCollection> ReadGeometryAsync(ProjectSession project, ulong documentId,
-        GeometryPortReference target, CancellationToken cancellation)
+        GeometryPortReference target, CancellationToken cancellation, GeometryReceipt? receipt = null)
     {
         if (!target.Matches(project, "output"))
             throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
         using var request = project.Request(documentId, HttpMethod.Get, PortRoute("outputs", target.PortId));
-        var payload = await SendAsync<JsonElement>(request, cancellation, timeoutSeconds: 60).ConfigureAwait(false);
+        if (receipt != null)
+        {
+            if (!receipt.Matches(project) || receipt.State != "committed" || !StrongTag(receipt.ETag))
+                throw new AlidadeConnectionException("Connect a committed receipt from this project.");
+            request.Headers.Add("X-Alidade-Request-Id", receipt.RequestId.ToString("D"));
+        }
+        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation, timeoutSeconds: 60)
+            .ConfigureAwait(false);
+        if (receipt != null && response.Headers.ETag?.ToString() != receipt.ETag)
+            throw new AlidadeConnectionException("Torquetum did not verify this Output against the receipt. Check that Torquetum supports receipt-based reads.",
+                code: "OUTPUT_REVISION_UNVERIFIED");
+        var payload = await ReadJsonAsync<JsonElement>(response, cancellation).ConfigureAwait(false);
         var collection = GeometryCollection.FromOwnedPayload(payload);
         if (!project.Status.SupportsCollection(collection.SchemaVersion))
             throw new AlidadeConnectionException("The paired project did not negotiate this collection format.");
@@ -84,7 +95,7 @@ internal static partial class AlidadeClient
         var payload = JsonSerializer.SerializeToUtf8Bytes(collection.Payload, JsonOptions);
         if (payload.Length > GeometryCollection.MaxExchangeBytes)
             throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
-        return new GeometryWriteRequest(Guid.NewGuid(), target, collection.SchemaVersion, payload);
+        return new GeometryWriteRequest(Guid.NewGuid(), target, collection.SchemaVersion, collection.HasNames, payload);
     }
 
     internal static async Task<GeometryReceipt> WriteGeometryAsync(ProjectSession project, ulong documentId,
@@ -96,6 +107,8 @@ internal static partial class AlidadeClient
             throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
         if (!project.Status.SupportsCollection(write.SchemaVersion))
             throw new AlidadeConnectionException("The paired project does not offer precise STEP exchange.");
+        if (write.HasNames && !project.Status.GeometryNames)
+            throw new AlidadeConnectionException(ErrorMessage("GEOMETRY_NAMES_UNSUPPORTED"), code: "GEOMETRY_NAMES_UNSUPPORTED");
         if (write.Payload.Length > project.Status.MaxBodyBytes)
             throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
         var receiptPath = ReceiptRoute(write.Id);
@@ -151,7 +164,7 @@ internal static partial class AlidadeClient
             "committed" when receipt.Result is { HttpStatus: 200 } committed
                 && committed.PortId == portId && StrongTag(committed.ETag) =>
                 new GeometryReceipt(requestId, status.ProjectId, status.InstanceId, "committed",
-                    committed.PortId, committed.ETag, "Sent geometry to Asterism.", null),
+                    committed.PortId, committed.ETag, "Asterism Input updated.", null),
             "rejected" when receipt.Result is { HttpStatus: >= 400 and < 600 } rejected && rejected.Error != null =>
                 new GeometryReceipt(requestId, status.ProjectId, status.InstanceId, "rejected", null, null,
                     ErrorException(rejected.Error, (HttpStatusCode)rejected.HttpStatus).Message, null),

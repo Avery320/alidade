@@ -26,6 +26,8 @@ internal static partial class AlidadeClient
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    internal static bool HasInvitationPrefix(string code) => code.StartsWith(InvitationPrefix, StringComparison.Ordinal);
+
     public static async Task<ProjectSession> PairAsync(string code, ulong documentId, CancellationToken cancellation)
     {
         try
@@ -38,6 +40,7 @@ internal static partial class AlidadeClient
                 clientName = "Alidade for Grasshopper",
                 apiVersion = ApiVersion,
                 collectionVersions = new[] { 1, 2 },
+                geometryNames = true,
             });
             var grant = await SendAsync<Grant>(request, cancellation).ConfigureAwait(false);
             if (grant.InstanceId != invitation.InstanceId ||
@@ -121,17 +124,22 @@ internal static partial class AlidadeClient
         "READ_ONLY" => "This project currently accepts only read access.",
         "PROJECT_SYNC_PENDING" => "Wait for the Torquetum project to finish synchronizing.",
         "VERSION_UNSUPPORTED" => "The Torquetum instance uses an incompatible Alidade version.",
+        "GEOMETRY_NAMES_UNSUPPORTED" => "Update Torquetum to send Geometry Names to this project.",
         "CAPACITY_EXCEEDED" => "Torquetum is handling other requests. Try again.",
         "PAIRING_LIMIT" => "The project has reached its pairing limit. Manage pairings in Torquetum.",
         "BRIDGE_UNAVAILABLE" => "Torquetum did not answer. Check the project and refresh the connection.",
         "PORT_NOT_FOUND" => "The Asterism port is unavailable or has the wrong direction. Refresh the port list.",
         "OUTPUT_NOT_READY" => "The Asterism output has no current Geometry Collection. Evaluate the graph and refresh the read.",
+        "INPUT_SUPERSEDED" => "A newer write replaced this Input version. Read using the latest receipt.",
+        "OUTPUT_UNRELATED" => "The selected Output does not depend on the Input in this receipt.",
+        "REQUEST_REJECTED" => "The Input write was rejected. Check its receipt in Send Geometry.",
         "STALE_REVISION" => "The Asterism input has changed. Refresh the port list, then choose Send again.",
         "PRECONDITION_REQUIRED" => "Refresh the Asterism input reference before sending.",
         "REQUEST_UNKNOWN" => "Torquetum has no receipt for this request. You can retry the same request.",
         "REQUEST_ID_CONFLICT" => "There is already a different request with this ID. Check its result before sending again.",
         "CONTENT_TOO_LARGE" => "The collection exceeds the Torquetum transfer limit.",
         "INVALID_GEOMETRY" => "Torquetum rejected geometry in the collection.",
+        "INVALID_ITEM_NAME" => "A Geometry Name must be a nonblank string.",
         "UNSUPPORTED_GEOMETRY" => "This collection contains geometry Torquetum cannot exchange.",
         "EXACT_CURVE_UNAVAILABLE" => "Torquetum cannot preserve the parameterization of this curve.",
         "INVALID_REQUEST" => "Torquetum rejected the request fields.",
@@ -142,7 +150,7 @@ internal static partial class AlidadeClient
     private static (Uri Endpoint, string Invite, Guid InstanceId) ReadInvitation(string code)
     {
         code = code.Trim();
-        if (code.Length <= 4096 && code.StartsWith(InvitationPrefix, StringComparison.Ordinal))
+        if (code.Length <= 4096 && HasInvitationPrefix(code))
         {
             try
             {
@@ -155,7 +163,7 @@ internal static partial class AlidadeClient
             catch (FormatException) { }
             catch (JsonException) { }
         }
-        throw new AlidadeConnectionException("Copy an Alidade invitation from the Torquetum project first.");
+        throw new AlidadeConnectionException("Copy a complete Alidade pairing code from Torquetum Project Settings.", code: "INVITE_INVALID");
     }
 
     private static Guid? ReadInstanceId(string? credential)
@@ -197,6 +205,7 @@ internal static partial class AlidadeClient
         public required int[] CollectionVersions { get; init; }
         public required bool CanRead { get; init; }
         public required bool CanWrite { get; init; }
+        public bool GeometryNames { get; init; }
         public string[]? Kinds { get; init; }
         public ProjectLimits? Limits { get; init; }
         public string? AvailabilityReason { get; init; }
@@ -213,7 +222,7 @@ internal static partial class AlidadeClient
             var bytes = Limits?.MaxBodyBytes is > 0 and var advertised
                 ? Math.Min(advertised, GeometryCollection.MaxExchangeBytes)
                 : step ? GeometryCollection.MaxExchangeBytes : 8 * 1024 * 1024;
-            return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason, step, bytes);
+            return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason, step, GeometryNames, bytes);
         }
     }
 

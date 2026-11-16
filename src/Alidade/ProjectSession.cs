@@ -8,7 +8,7 @@ namespace Torquetum.Alidade;
 
 internal sealed record ProjectStatus(
     string ProjectId, Guid InstanceId, string ProjectName, bool CanRead, bool CanWrite,
-    string? AvailabilityReason, bool SupportsStep, int MaxBodyBytes)
+    string? AvailabilityReason, bool SupportsStep, bool GeometryNames, int MaxBodyBytes)
 {
     internal bool SupportsCollection(int version) => version == 1 || (version == 2 && SupportsStep);
     internal bool Matches(string projectId, Guid instanceId) => ProjectId == projectId && InstanceId == instanceId;

@@ -44,14 +44,13 @@ internal static class GeometryCollectionConverter
     }
 
     internal static GeometryCollection? Build(
-        GH_Structure<IGH_Goo> geometry, GH_Structure<GH_String>? keys, double scale, List<CollectionDiagnostic> diagnostics,
-        RhinoDoc? document)
+        GH_Structure<IGH_Goo> geometry, GH_Structure<GH_String>? keys, GH_Structure<GH_String>? names, double scale,
+        List<CollectionDiagnostic> diagnostics, RhinoDoc? document)
     {
-        if (keys != null && keys.PathCount != geometry.PathCount)
-        {
-            diagnostics.Add(new("ITEM_KEYS_STRUCTURE", "Item Keys must have exactly the Geometry tree's branches."));
+        if (!CheckMetadataTree(keys, geometry, "ITEM_KEYS_STRUCTURE", "Geometry IDs", diagnostics)
+            || !CheckMetadataTree(names, geometry, "ITEM_NAMES_STRUCTURE", "Geometry Names", diagnostics))
             return null;
-        }
+
         var branches = new List<object>(geometry.PathCount);
         var schemaVersion = 1;
         double? toleranceMetres = null;
@@ -61,21 +60,19 @@ internal static class GeometryCollectionConverter
             var path = geometry.Paths[branchIndex].Indices.ToArray();
             var values = geometry.Branches[branchIndex];
             var keyBranch = keys?.Branches[branchIndex];
-            if (keys != null && (!path.AsSpan().SequenceEqual(keys.Paths[branchIndex].Indices)
-                || keyBranch!.Count != values.Count))
-            {
-                diagnostics.Add(new("ITEM_KEYS_STRUCTURE", "Item Keys must match the Geometry tree's paths and slots.", path));
-                continue;
-            }
+            var nameBranch = names?.Branches[branchIndex];
             var items = new object?[values.Count];
             for (var index = 0; index < values.Count; index++)
             {
                 var item = values[index];
                 var key = keyBranch?[index]?.Value;
+                var name = nameBranch?[index]?.Value;
                 if (item == null)
                 {
                     if (key != null)
-                        diagnostics.Add(new("ITEM_KEYS_STRUCTURE", "A null geometry slot cannot have a key.", path, index, "itemKey"));
+                        diagnostics.Add(new("ITEM_KEYS_STRUCTURE", "A null geometry slot cannot have a Geometry ID.", path, index, "itemKey"));
+                    if (name != null)
+                        diagnostics.Add(new("ITEM_NAMES_STRUCTURE", "A null geometry slot cannot have a Geometry Name.", path, index, "name"));
                     continue;
                 }
                 try
@@ -84,6 +81,8 @@ internal static class GeometryCollectionConverter
                         new CollectionDiagnostic(code, message, path, index, Warning: true)));
                     if (key != null)
                         shape["itemKey"] = key;
+                    if (name != null)
+                        shape["name"] = name;
                     if (shape["kind"] is "brep-step")
                         schemaVersion = 2;
                     items[index] = shape;
@@ -108,11 +107,31 @@ internal static class GeometryCollectionConverter
         }
     }
 
-    internal static (GH_Structure<IGH_Goo> Geometry, GH_Structure<GH_String> Keys)? Unpack(
+    private static bool CheckMetadataTree(GH_Structure<GH_String>? metadata, GH_Structure<IGH_Goo> geometry,
+        string code, string label, List<CollectionDiagnostic> diagnostics)
+    {
+        if (metadata == null)
+            return true;
+        if (metadata.PathCount != geometry.PathCount)
+        {
+            diagnostics.Add(new(code, $"{label} must have exactly the Geometry tree's branches."));
+            return false;
+        }
+        for (var index = 0; index < geometry.PathCount; index++)
+        {
+            var path = geometry.Paths[index].Indices;
+            if (!path.AsSpan().SequenceEqual(metadata.Paths[index].Indices) || metadata.Branches[index].Count != geometry.Branches[index].Count)
+                diagnostics.Add(new(code, $"{label} must match the Geometry tree's paths and slots.", path.ToArray()));
+        }
+        return diagnostics.All(item => item.Warning);
+    }
+
+    internal static (GH_Structure<IGH_Goo> Geometry, GH_Structure<GH_String> Keys, GH_Structure<GH_String> Names)? Unpack(
         GeometryCollection collection, double scale, List<CollectionDiagnostic> diagnostics, RhinoDoc? document)
     {
         var geometry = new GH_Structure<IGH_Goo>();
         var keys = new GH_Structure<GH_String>();
+        var names = new GH_Structure<GH_String>();
         double? toleranceMetres = null;
         double CadTolerance() => toleranceMetres ??= RhinoStepGeometry.ToleranceMetres(document);
         foreach (var branch in collection.Payload.GetProperty("branches").EnumerateArray())
@@ -121,14 +140,15 @@ internal static class GeometryCollectionConverter
             var path = new GH_Path(indices);
             geometry.EnsurePath(path);
             keys.EnsurePath(path);
+            names.EnsurePath(path);
             var index = 0;
             foreach (var item in branch.GetProperty("items").EnumerateArray())
             {
                 try
                 {
                     geometry.Append(item.ValueKind == JsonValueKind.Null ? null! : DecodeItem(item, scale, CadTolerance), path);
-                    keys.Append(item.ValueKind == JsonValueKind.Object && item.TryGetProperty("itemKey", out var key)
-                        ? new GH_String(key.GetString()) : null!, path);
+                    keys.Append(ItemText(item, "itemKey")!, path);
+                    names.Append(ItemText(item, "name")!, path);
                 }
                 catch (CollectionFormatException error)
                 {
@@ -138,7 +158,7 @@ internal static class GeometryCollectionConverter
             }
         }
         if (diagnostics.Count == 0)
-            return (geometry, keys);
+            return (geometry, keys, names);
 
         foreach (var branch in geometry.Branches)
         foreach (var item in branch)
@@ -149,6 +169,9 @@ internal static class GeometryCollectionConverter
         }
         return null;
     }
+
+    private static GH_String? ItemText(JsonElement item, string property) =>
+        item.ValueKind == JsonValueKind.Object && item.TryGetProperty(property, out var value) ? new GH_String(value.GetString()) : null;
 
     private static Dictionary<string, object?> EncodeItem(IGH_Goo item, double scale, Func<double> cadTolerance,
         Action<string, string> warn)

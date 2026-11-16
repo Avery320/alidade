@@ -2,6 +2,8 @@ using System;
 using System.Net;
 using System.Windows.Forms;
 using Grasshopper.Kernel;
+using Grasshopper.Kernel.Types;
+using GH_IO.Serialization;
 
 namespace Torquetum.Alidade;
 
@@ -32,6 +34,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     private Attempt? _attempt;
     private string? _problem;
     private string _ready = "Connect to Torquetum first.";
+    private bool _triggerHigh = true;
 
     public SendGeometry()
         : base("Send Geometry", "Send Geometry", "Send a Geometry Collection to an Asterism input on demand.", "Exchange") { }
@@ -44,7 +47,8 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         manager.AddParameter(new AlidadeProjectParameter());
         manager.AddParameter(new AlidadeCollectionParameter());
         manager.AddParameter(new AlidadePortReferenceParameter(), "Target", "T", "Asterism input to update.", GH_ParamAccess.item);
-        for (var i = 0; i < 3; i++)
+        manager.AddBooleanParameter("Send", "Send", "Connect a Grasshopper Button to send once per press.", GH_ParamAccess.item);
+        for (var i = 0; i < 4; i++)
             manager[i].Optional = true;
     }
 
@@ -52,7 +56,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     {
         manager.AddParameter(new AlidadeWriteReceiptParameter());
         manager.AddParameter(new AlidadePortReferenceParameter());
-        manager.AddTextParameter("Status", "S", "State of the last write and current inputs.", GH_ParamAccess.item);
+        manager.AddTextParameter("Status", "S", "Send status for the current geometry and target.", GH_ParamAccess.item);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -71,16 +75,28 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         else if (_inputs != next && next != null)
             _problem = null;
         _inputs = next;
-
-        var attempt = _attempt;
-        var error = _problem ?? attempt?.Error;
-        string status;
-        if (attempt != null && ReferenceEquals(_project, attempt.Inputs.Project))
+        if (Params.Input.Count > 3 && Params.Input[3].SourceCount > 0 && SingleInput<GH_Boolean>(data, 3) is { } trigger)
         {
-            status = IsPending ? "Checking the geometry write…" : _problem ?? attempt.Error ?? attempt.Receipt?.Message
-                ?? "Result unconfirmed. Use Check result.";
-            if (_inputs != attempt.Inputs)
-                status += " (previous inputs)";
+            var pressed = trigger.Value && !_triggerHigh;
+            _triggerHigh = trigger.Value;
+            if (pressed) Begin();
+        }
+        else
+            _triggerHigh = true;
+
+        var status = _problem ?? _ready;
+        var error = _problem;
+        if (_attempt is { } attempt && ReferenceEquals(_project, attempt.Inputs.Project))
+        {
+            if (next is { } current && MatchesCurrent(attempt, current) && Unavailable(current.Project, current.Collection) == null)
+            {
+                status = IsPending ? $"Sending to {current.Target.DisplayName}…" : _problem ?? attempt.Error
+                    ?? attempt.Receipt?.Message ?? "Result unconfirmed. Use Check result.";
+                error ??= attempt.Error;
+            }
+            else if (next != null && (IsPending || !attempt.CanStartAnother))
+                status += " Check the previous send before sending again.";
+
             if (attempt.Receipt is { } receipt)
             {
                 data.SetData(0, new AlidadeWriteReceipt(receipt));
@@ -88,11 +104,12 @@ public sealed class SendGeometry : AlidadeAsyncComponent
                     data.SetData(1, new AlidadePortReference(attempt.Inputs.Target with { ETag = tag }));
             }
         }
-        else
-            status = _problem ?? _ready;
-
         ReportStatus(data, 2, status, error);
     }
+
+    private static bool MatchesCurrent(Attempt attempt, Inputs current) => ReferenceEquals(attempt.Inputs.Collection, current.Collection)
+        && attempt.Inputs.Target.PortId == current.Target.PortId
+        && (attempt.Inputs.Target.ETag == current.Target.ETag || attempt.Receipt?.ETag == current.Target.ETag);
 
     private Inputs? Capture(IGH_DataAccess data, ProjectSession? project)
     {
@@ -112,13 +129,14 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             _ready = "Select an Asterism input in the connected project.";
             return null;
         }
-        _ready = Unavailable(project, collection) ?? $"Ready to send to {reference.Name}.";
+        _ready = Unavailable(project, collection) ?? $"Ready to send to {reference.DisplayName}.";
         return new Inputs(project, collection, reference);
     }
 
     private static string? Unavailable(ProjectSession project, GeometryCollection collection) =>
         !project.Status.CanWrite ? AlidadeClient.ErrorMessage("READ_ONLY")
         : !project.Status.SupportsCollection(collection.SchemaVersion) ? "The paired project does not offer precise STEP exchange."
+        : collection.HasNames && !project.Status.GeometryNames ? AlidadeClient.ErrorMessage("GEOMETRY_NAMES_UNSUPPORTED")
         : null;
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
@@ -221,5 +239,12 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         _attempt = null;
         _problem = null;
         _ready = "Connect to Torquetum first.";
+        _triggerHigh = true;
+    }
+
+    public override bool Read(GH_IReader reader)
+    {
+        ComponentArchive.RestoreAppendedParameter(reader, Params.Input[3], 3, input: true);
+        return base.Read(reader);
     }
 }
