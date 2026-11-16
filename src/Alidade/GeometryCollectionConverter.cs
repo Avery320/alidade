@@ -47,8 +47,7 @@ internal static class GeometryCollectionConverter
         GH_Structure<IGH_Goo> geometry, GH_Structure<GH_String>? keys, GH_Structure<GH_String>? names, double scale,
         List<CollectionDiagnostic> diagnostics, RhinoDoc? document)
     {
-        if (!CheckMetadataTree(keys, geometry, "ITEM_KEYS_STRUCTURE", "Geometry IDs", diagnostics)
-            || !CheckMetadataTree(names, geometry, "ITEM_NAMES_STRUCTURE", "Geometry Names", diagnostics))
+        if (!CheckMetadataTrees(geometry, keys, names, diagnostics))
             return null;
 
         var branches = new List<object>(geometry.PathCount);
@@ -107,21 +106,26 @@ internal static class GeometryCollectionConverter
         }
     }
 
-    private static bool CheckMetadataTree(GH_Structure<GH_String>? metadata, GH_Structure<IGH_Goo> geometry,
-        string code, string label, List<CollectionDiagnostic> diagnostics)
+    private static bool CheckMetadataTrees(GH_Structure<IGH_Goo> geometry, GH_Structure<GH_String>? keys,
+        GH_Structure<GH_String>? names, List<CollectionDiagnostic> diagnostics)
     {
-        if (metadata == null)
-            return true;
-        if (metadata.PathCount != geometry.PathCount)
+        if (keys == null && names == null) return true;
+        var fields = new[] { (keys, "ITEM_KEYS_STRUCTURE", "Geometry IDs"), (names, "ITEM_NAMES_STRUCTURE", "Geometry Names") };
+        foreach (var (tree, code, label) in fields)
         {
-            diagnostics.Add(new(code, $"{label} must have exactly the Geometry tree's branches."));
-            return false;
+            if (tree != null && tree.PathCount != geometry.PathCount)
+            {
+                diagnostics.Add(new(code, $"{label} must have exactly the Geometry tree's branches."));
+                return false;
+            }
         }
         for (var index = 0; index < geometry.PathCount; index++)
         {
             var path = geometry.Paths[index].Indices;
-            if (!path.AsSpan().SequenceEqual(metadata.Paths[index].Indices) || metadata.Branches[index].Count != geometry.Branches[index].Count)
-                diagnostics.Add(new(code, $"{label} must match the Geometry tree's paths and slots.", path.ToArray()));
+            var count = geometry.Branches[index].Count;
+            foreach (var (tree, code, label) in fields)
+                if (tree != null && (!path.AsSpan().SequenceEqual(tree.Paths[index].Indices) || tree.Branches[index].Count != count))
+                    diagnostics.Add(new(code, $"{label} must match the Geometry tree's paths and slots.", path.ToArray()));
         }
         return diagnostics.All(item => item.Warning);
     }

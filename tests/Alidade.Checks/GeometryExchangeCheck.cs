@@ -16,14 +16,7 @@ internal static class GeometryExchangeCheck
         var token = timeout.Token;
 
         var session = await AlidadeClient.PairAsync(invite, documentId, token);
-        try
-        {
-            await AlidadeClient.ListPortsAsync(session, documentId + 1, token);
-            throw new InvalidOperationException("Project session accepted another Grasshopper document.");
-        }
-        catch (AlidadeConnectionException error) when (error.PairingRequired)
-        {
-        }
+        await ExpectError("PAIRING_REQUIRED", () => AlidadeClient.ListPortsAsync(session, documentId + 1, token));
 
         var status = session.Status;
         var refreshed = await AlidadeClient.ReadProjectAsync(session, documentId, token);
@@ -36,31 +29,14 @@ internal static class GeometryExchangeCheck
         var inputRef = input.Reference(status);
         var outputRef = output.Reference(status);
 
-        try
-        {
-            await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token);
-            throw new InvalidOperationException("A fresh graph reported a completed output before its first input.");
-        }
-        catch (AlidadeConnectionException error) when (error.Code == "OUTPUT_NOT_READY")
-        {
-        }
+        await ExpectError("OUTPUT_NOT_READY", () => AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token));
 
         var named = JsonNode.Parse(collection.Payload.GetRawText())!;
         named["branches"]![0]!["items"]![0]!["name"] = "Fixture point";
         var namedCollection = Parse(named.ToJsonString());
         if (!status.GeometryNames)
-        {
-            try
-            {
-                var unsupported = AlidadeClient.PrepareWrite(namedCollection, inputRef);
-                await AlidadeClient.WriteGeometryAsync(session, documentId, unsupported, token);
-                throw new InvalidOperationException("A named write was sent without negotiated Geometry Names.");
-            }
-            catch (AlidadeConnectionException error) when (error.Code == "GEOMETRY_NAMES_UNSUPPORTED")
-            {
-                Console.WriteLine("PASS a host without Geometry Names rejects named writes locally.");
-            }
-        }
+            await ExpectError("GEOMETRY_NAMES_UNSUPPORTED", () =>
+                AlidadeClient.WriteGeometryAsync(session, documentId, AlidadeClient.PrepareWrite(namedCollection, inputRef), token));
 
         var send = AlidadeClient.PrepareWrite(status.GeometryNames ? namedCollection : collection, inputRef);
         var committed = await Committed(send);
@@ -69,7 +45,7 @@ internal static class GeometryExchangeCheck
         var replay = await Committed(send);
         Check(replay.RequestId == committed.RequestId && replay.PortId == id && replay.ETag == committed.ETag, "same write replay");
 
-        var original = await ReadOutput(outputRef, committed);
+        var original = await ReadOutput(committed);
         Check(original.GetProperty("branches")[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null
             && original.GetProperty("branches")[1].GetProperty("items").GetArrayLength() == 0,
             "read preserves null and empty branch");
@@ -77,14 +53,8 @@ internal static class GeometryExchangeCheck
             Check(original.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("name").GetString() == "Fixture point",
                 "negotiated Geometry Names survive the Output read");
 
-        try
-        {
-            await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, committed with { ETag = "\"unverified\"" });
-            throw new InvalidOperationException("A successful reply did not verify the receipt's revision.");
-        }
-        catch (AlidadeConnectionException error) when (error.Code == "OUTPUT_REVISION_UNVERIFIED")
-        {
-        }
+        await ExpectError("OUTPUT_REVISION_UNVERIFIED", () =>
+            AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, committed with { ETag = "\"unverified\"" }));
 
         var edited = JsonNode.Parse(original.GetRawText())!;
         edited["branches"]![0]!["items"]![0]!["position"]![0] = 4;
@@ -93,26 +63,11 @@ internal static class GeometryExchangeCheck
         Check(updated.PortId == id && updated.ETag != null && updated.ETag != committed.ETag,
             "update keeps input identity and advances its revision");
 
-        try
-        {
-            await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, committed);
-            throw new InvalidOperationException("The previous receipt returned output after its input was replaced.");
-        }
-        catch (AlidadeConnectionException error) when (error.Code == "INPUT_SUPERSEDED")
-        {
-        }
+        await ExpectError("INPUT_SUPERSEDED", () => AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, committed));
+        await ExpectError("STALE_REVISION", () =>
+            AlidadeClient.WriteGeometryAsync(session, documentId, AlidadeClient.PrepareWrite(collection, inputRef), token));
 
-        try
-        {
-            var stale = AlidadeClient.PrepareWrite(collection, inputRef);
-            await AlidadeClient.WriteGeometryAsync(session, documentId, stale, token);
-            throw new InvalidOperationException("The previous revision was accepted.");
-        }
-        catch (AlidadeConnectionException error) when (error.Code == "STALE_REVISION")
-        {
-        }
-
-        var finalPayload = await ReadOutput(outputRef);
+        var finalPayload = await ReadOutput(updated);
         Check(finalPayload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 4,
             "the same output port returns the graph result after input changes");
         Console.WriteLine("PASS live C# pair, document scoping, port list, exact replay, output reads, superseded receipts and stale protection.");
@@ -120,8 +75,7 @@ internal static class GeometryExchangeCheck
         var cadWrite = AlidadeClient.PrepareWrite(cadCollection, await CurrentInput());
         if (status.SupportsStep)
         {
-            await Committed(cadWrite);
-            var cadPayload = await ReadOutput(outputRef);
+            var cadPayload = await ReadOutput(await Committed(cadWrite));
             var cadBranches = cadPayload.GetProperty("branches");
             Check(cadPayload.GetProperty("schemaVersion").GetInt32() == 2
                 && cadBranches[0].GetProperty("items")[0].GetProperty("shapeType").GetString() == "solid"
@@ -131,17 +85,7 @@ internal static class GeometryExchangeCheck
             Console.WriteLine("PASS negotiated STEP solid, face and shell through the live Project API.");
         }
         else
-        {
-            try
-            {
-                await AlidadeClient.WriteGeometryAsync(session, documentId, cadWrite, token);
-                throw new InvalidOperationException("Unnegotiated STEP request was accepted.");
-            }
-            catch (AlidadeConnectionException error) when (error.Message == "The paired project does not offer precise STEP exchange.")
-            {
-                Console.WriteLine("PASS a v1-only Project rejects STEP before sending.");
-            }
-        }
+            await ExpectError("STEP_UNSUPPORTED", () => AlidadeClient.WriteGeometryAsync(session, documentId, cadWrite, token));
 
         async Task<GeometryPortReference> CurrentInput()
         {
@@ -149,13 +93,13 @@ internal static class GeometryExchangeCheck
             return listing.Single(port => port.Id == id).Reference(status);
         }
 
-        async Task<JsonElement> ReadOutput(GeometryPortReference reference, GeometryReceipt? receipt = null)
+        async Task<JsonElement> ReadOutput(GeometryReceipt receipt)
         {
             while (true)
             {
                 try
                 {
-                    return (await AlidadeClient.ReadGeometryAsync(session, documentId, reference, token, receipt)).Payload;
+                    return (await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, receipt)).Payload;
                 }
                 catch (AlidadeConnectionException error) when (error.Code == "OUTPUT_NOT_READY")
                 {
@@ -175,5 +119,18 @@ internal static class GeometryExchangeCheck
             Check(receipt.State == "committed", $"write receipt is committed ({receipt.Message})");
             return receipt;
         }
+    }
+
+    private static async Task ExpectError(string code, Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (AlidadeConnectionException error) when (code == "PAIRING_REQUIRED" ? error.PairingRequired : error.Code == code)
+        {
+            return;
+        }
+        throw new InvalidOperationException($"Expected {code}.");
     }
 }

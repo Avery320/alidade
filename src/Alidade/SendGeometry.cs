@@ -13,18 +13,12 @@ public sealed class SendGeometry : AlidadeAsyncComponent
 
     private sealed class Attempt
     {
-        internal Attempt(Inputs inputs, GeometryWriteRequest request)
-        {
-            Inputs = inputs;
-            Id = request.Id;
-            Request = request;
-        }
-
-        internal Inputs Inputs { get; }
-        internal Guid Id { get; }
+        internal required ProjectSession Project { get; init; }
+        internal required GeometryPortReference Target { get; init; }
+        internal required WeakReference<GeometryCollection> Collection { get; init; }
+        internal required Guid Id { get; init; }
         internal GeometryWriteRequest? Request { get; set; }
         internal GeometryReceipt? Receipt { get; set; }
-        internal string? Error { get; set; }
         internal DateTimeOffset? RetryAfter { get; set; }
         internal bool CanStartAnother { get; set; }
     }
@@ -32,8 +26,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     private ProjectSession? _project;
     private Inputs? _inputs;
     private Attempt? _attempt;
-    private string? _problem;
-    private string _ready = "Connect to Torquetum first.";
+    private string? _prepareError;
     private bool _triggerHigh = true;
 
     public SendGeometry()
@@ -63,19 +56,15 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     {
         var document = OnPingDocument();
         _project = ConnectedProject(data, document);
-        var switched = _attempt is { } old && _project != null && !ReferenceEquals(old.Inputs.Project, _project);
-        if (switched)
+        if (_attempt is { } old && _project != null && !ReferenceEquals(old.Project, _project))
         {
             CancelRequest();
             _attempt = null;
         }
-        var next = Capture(data, _project);
-        if (switched)
-            _problem = "Project changed. A previous receipt belongs to its original connection.";
-        else if (_inputs != next && next != null)
-            _problem = null;
+        var (next, blocked) = Capture(data, _project);
+        if (_inputs != next) _prepareError = null;
         _inputs = next;
-        if (Params.Input.Count > 3 && Params.Input[3].SourceCount > 0 && SingleInput<GH_Boolean>(data, 3) is { } trigger)
+        if (Params.Input[3].SourceCount > 0 && SingleInput<GH_Boolean>(data, 3) is { } trigger)
         {
             var pressed = trigger.Value && !_triggerHigh;
             _triggerHigh = trigger.Value;
@@ -84,60 +73,54 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         else
             _triggerHigh = true;
 
-        var status = _problem ?? _ready;
-        var error = _problem;
-        if (_attempt is { } attempt && ReferenceEquals(_project, attempt.Inputs.Project))
+        var error = _prepareError ?? (next != null ? blocked : null);
+        var status = error ?? blocked ?? "Ready";
+        if (_attempt is { } attempt && ReferenceEquals(_project, attempt.Project))
         {
-            if (next is { } current && MatchesCurrent(attempt, current) && Unavailable(current.Project, current.Collection) == null)
+            if (next is { } current && blocked == null)
             {
-                status = IsPending ? $"Sending to {current.Target.DisplayName}…" : _problem ?? attempt.Error
-                    ?? attempt.Receipt?.Message ?? "Result unconfirmed. Use Check result.";
-                error ??= attempt.Error;
+                if (MatchesCurrent(attempt, current))
+                {
+                    error ??= Failure?.Message ?? (attempt.Receipt is { State: "rejected" } rejected ? rejected.Message : null);
+                    status = IsPending ? "Sending…" : error ?? (attempt.Receipt?.State == "committed" ? "Sent" : "Check result");
+                }
+                else if (IsPending || !attempt.CanStartAnother)
+                    status = "Check previous send";
             }
-            else if (next != null && (IsPending || !attempt.CanStartAnother))
-                status += " Check the previous send before sending again.";
 
             if (attempt.Receipt is { } receipt)
             {
                 data.SetData(0, new AlidadeWriteReceipt(receipt));
                 if (receipt is { State: "committed", ETag: { } tag })
-                    data.SetData(1, new AlidadePortReference(attempt.Inputs.Target with { ETag = tag }));
+                    data.SetData(1, new AlidadePortReference(attempt.Target with { ETag = tag }));
             }
         }
         ReportStatus(data, 2, status, error);
     }
 
-    private static bool MatchesCurrent(Attempt attempt, Inputs current) => ReferenceEquals(attempt.Inputs.Collection, current.Collection)
-        && attempt.Inputs.Target.PortId == current.Target.PortId
-        && (attempt.Inputs.Target.ETag == current.Target.ETag || attempt.Receipt?.ETag == current.Target.ETag);
+    private static bool MatchesCurrent(Attempt attempt, Inputs current) => attempt.Collection.TryGetTarget(out var collection)
+        && ReferenceEquals(collection, current.Collection) && attempt.Target.PortId == current.Target.PortId
+        && (attempt.Target.ETag == current.Target.ETag || attempt.Receipt?.ETag == current.Target.ETag);
 
-    private Inputs? Capture(IGH_DataAccess data, ProjectSession? project)
+    private (Inputs? Inputs, string? Blocked) Capture(IGH_DataAccess data, ProjectSession? project)
     {
         if (project == null)
-        {
-            _ready = "Connect to Torquetum first.";
-            return null;
-        }
+            return (null, "Connect Project");
         if (SingleInput<AlidadeCollection>(data, 1)?.Value is not { GeometryCount: > 0 } collection)
-        {
-            _ready = "Connect one nonempty Geometry Collection.";
-            return null;
-        }
-
+            return (null, "Connect Geometry Collection");
         if (ConnectedPort(data, 2, project, "input") is not { } reference)
-        {
-            _ready = "Select an Asterism input in the connected project.";
-            return null;
-        }
-        _ready = Unavailable(project, collection) ?? $"Ready to send to {reference.DisplayName}.";
-        return new Inputs(project, collection, reference);
+            return (null, "Choose Input");
+        var input = new Inputs(project, collection, reference);
+        return (input, Unavailable(input));
     }
 
-    private static string? Unavailable(ProjectSession project, GeometryCollection collection) =>
-        !project.Status.CanWrite ? AlidadeClient.ErrorMessage("READ_ONLY")
-        : !project.Status.SupportsCollection(collection.SchemaVersion) ? "The paired project does not offer precise STEP exchange."
-        : collection.HasNames && !project.Status.GeometryNames ? AlidadeClient.ErrorMessage("GEOMETRY_NAMES_UNSUPPORTED")
-        : null;
+    private static string? Unavailable(Inputs input)
+    {
+        var project = input.Project.Status;
+        var code = project.CanWrite ? project.CollectionWriteError(input.Collection.SchemaVersion, input.Collection.HasNames)
+            : project.AvailabilityReason ?? "READ_ONLY";
+        return code == null ? null : AlidadeClient.ErrorMessage(code);
+    }
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
     {
@@ -149,11 +132,11 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         Menu_AppendItem(menu, "Retry same request", (_, _) => Continue(check: false), enabled && CanContinue(check: false));
     }
 
-    private bool CanStart() => _inputs is { } input && Unavailable(input.Project, input.Collection) == null
+    private bool CanStart() => _inputs is { } input && Unavailable(input) == null
         && (_attempt == null || _attempt.CanStartAnother);
 
     private bool CanContinue(bool check) =>
-        _attempt is { } attempt && ReferenceEquals(_project, attempt.Inputs.Project)
+        _attempt is { } attempt && ReferenceEquals(_project, attempt.Project)
         && (attempt.RetryAfter == null || attempt.RetryAfter <= DateTimeOffset.UtcNow)
         && (check || attempt.Request != null);
 
@@ -166,15 +149,19 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         try
         {
             var target = input.Target;
-            if (_attempt is { Receipt: { State: "committed", ETag: { } tag } } previous && previous.Inputs.Target == target)
+            if (_attempt is { Receipt: { State: "committed", ETag: { } tag } } previous && previous.Target == target)
                 target = target with { ETag = tag };
-            _attempt = new Attempt(input, AlidadeClient.PrepareWrite(input.Collection, target));
-            _problem = null;
+            var request = AlidadeClient.PrepareWrite(input.Collection, target);
+            _attempt = new Attempt
+            {
+                Project = input.Project, Target = input.Target, Collection = new(input.Collection),
+                Id = request.Id, Request = request,
+            };
             Execute(document, _attempt, check: false);
         }
         catch (AlidadeConnectionException error)
         {
-            _problem = error.Message;
+            _prepareError = error.Message;
             RequestSolution(document);
         }
     }
@@ -183,7 +170,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     {
         var document = OnPingDocument();
         if (IsPending || !CanContinue(check) || _attempt is not { } attempt
-            || !CanUseProject(document, attempt.Inputs.Project))
+            || !CanUseProject(document, attempt.Project))
             return;
 
         Execute(document, attempt, check);
@@ -191,12 +178,12 @@ public sealed class SendGeometry : AlidadeAsyncComponent
 
     private void Execute(GH_Document document, Attempt attempt, bool check)
     {
-        var project = attempt.Inputs.Project;
+        var project = attempt.Project;
         var request = attempt.Request;
-        attempt.Error = null;
-        _problem = null;
+        if (!check) attempt.CanStartAnother = false; // Retried writes can be admitted even if the original was not.
+        _prepareError = null;
         StartRequest(document, project, cancellation => check
-                ? AlidadeClient.CheckReceiptAsync(project, document.RuntimeID, attempt.Id, attempt.Inputs.Target.PortId, cancellation)
+                ? AlidadeClient.CheckReceiptAsync(project, document.RuntimeID, attempt.Id, attempt.Target.PortId, cancellation)
                 : AlidadeClient.WriteGeometryAsync(project, document.RuntimeID, request!, cancellation),
             receipt =>
             {
@@ -210,7 +197,6 @@ public sealed class SendGeometry : AlidadeAsyncComponent
 
     private static void RecordFailure(Attempt attempt, AlidadeConnectionException error, bool checking)
     {
-        attempt.Error = error.Message;
         attempt.RetryAfter = error.RetryAfter;
         if (checking)
         {
@@ -237,8 +223,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         _project = null;
         _inputs = null;
         _attempt = null;
-        _problem = null;
-        _ready = "Connect to Torquetum first.";
+        _prepareError = null;
         _triggerHigh = true;
     }
 

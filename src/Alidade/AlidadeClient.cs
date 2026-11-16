@@ -71,9 +71,9 @@ internal static partial class AlidadeClient
         }
     }
 
-    private static async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken cancellation, int timeoutSeconds = 15)
+    private static async Task<T> SendAsync<T>(HttpRequestMessage request, CancellationToken cancellation)
     {
-        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation, timeoutSeconds).ConfigureAwait(false);
+        using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation).ConfigureAwait(false);
         return await ReadJsonAsync<T>(response, cancellation).ConfigureAwait(false);
     }
 
@@ -108,7 +108,7 @@ internal static partial class AlidadeClient
     private static AlidadeConnectionException ErrorException(ErrorDetails? error, HttpStatusCode status,
         DateTimeOffset? retryAfter = null)
     {
-        var message = ErrorMessage(error?.Code);
+        var message = ErrorMessage(error?.Code, error?.Message);
         if (error?.Path is { Length: > 0 } path)
             message += $" Branch {{{string.Join(";", path)}}}" +
                 (error.ItemIndex is { } index ? $", item {index}." : ".");
@@ -116,34 +116,22 @@ internal static partial class AlidadeClient
             code: error?.Code, httpStatus: status, retryAfter: retryAfter);
     }
 
-    internal static string ErrorMessage(string? code) => code switch
+    internal static string ErrorMessage(string? code, string? serverMessage = null) => code switch
     {
         "INVITE_INVALID" => "The invitation is unavailable. Copy a new invitation from Torquetum.",
         "PAIRING_REQUIRED" => "Pair with the project again.",
+        "PORT_NOT_FOUND" => "The Asterism port is unavailable or has the wrong direction. Refresh the port list.",
+        "STALE_REVISION" => "The Asterism input has changed. Refresh the port list, then choose Send again.",
+        "REQUEST_UNKNOWN" => "Torquetum has no receipt for this request. You can retry the same request.",
+        "REQUEST_ID_CONFLICT" => "There is already a different request with this ID. Check its result before sending again.",
+        _ when serverMessage is { Length: > 0 and <= 1024 } && !string.IsNullOrWhiteSpace(serverMessage) => serverMessage,
         "PROJECT_BUSY" => "The Torquetum project is busy. Try again when it is ready.",
         "READ_ONLY" => "This project currently accepts only read access.",
         "PROJECT_SYNC_PENDING" => "Wait for the Torquetum project to finish synchronizing.",
-        "VERSION_UNSUPPORTED" => "The Torquetum instance uses an incompatible Alidade version.",
+        "STEP_UNSUPPORTED" => "The paired project does not offer precise STEP exchange.",
         "GEOMETRY_NAMES_UNSUPPORTED" => "Update Torquetum to send Geometry Names to this project.",
-        "CAPACITY_EXCEEDED" => "Torquetum is handling other requests. Try again.",
-        "PAIRING_LIMIT" => "The project has reached its pairing limit. Manage pairings in Torquetum.",
-        "BRIDGE_UNAVAILABLE" => "Torquetum did not answer. Check the project and refresh the connection.",
-        "PORT_NOT_FOUND" => "The Asterism port is unavailable or has the wrong direction. Refresh the port list.",
-        "OUTPUT_NOT_READY" => "The Asterism output has no current Geometry Collection. Evaluate the graph and refresh the read.",
-        "INPUT_SUPERSEDED" => "A newer write replaced this Input version. Read using the latest receipt.",
-        "OUTPUT_UNRELATED" => "The selected Output does not depend on the Input in this receipt.",
-        "REQUEST_REJECTED" => "The Input write was rejected. Check its receipt in Send Geometry.",
-        "STALE_REVISION" => "The Asterism input has changed. Refresh the port list, then choose Send again.",
         "PRECONDITION_REQUIRED" => "Refresh the Asterism input reference before sending.",
-        "REQUEST_UNKNOWN" => "Torquetum has no receipt for this request. You can retry the same request.",
-        "REQUEST_ID_CONFLICT" => "There is already a different request with this ID. Check its result before sending again.",
         "CONTENT_TOO_LARGE" => "The collection exceeds the Torquetum transfer limit.",
-        "INVALID_GEOMETRY" => "Torquetum rejected geometry in the collection.",
-        "INVALID_ITEM_NAME" => "A Geometry Name must be a nonblank string.",
-        "UNSUPPORTED_GEOMETRY" => "This collection contains geometry Torquetum cannot exchange.",
-        "EXACT_CURVE_UNAVAILABLE" => "Torquetum cannot preserve the parameterization of this curve.",
-        "INVALID_REQUEST" => "Torquetum rejected the request fields.",
-        "UNSUPPORTED_MEDIA_TYPE" => "Torquetum cannot read this exchange format.",
         _ => "Torquetum rejected the request.",
     };
 
@@ -246,6 +234,7 @@ internal static partial class AlidadeClient
     private sealed class ErrorDetails
     {
         public string? Code { get; init; }
+        public string? Message { get; init; }
         public int[]? Path { get; init; }
         public int? ItemIndex { get; init; }
     }

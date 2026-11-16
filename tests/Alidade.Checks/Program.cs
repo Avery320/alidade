@@ -24,19 +24,11 @@ internal static class AlidadeChecks
         var diagnostics = new List<CollectionDiagnostic>();
         var fixture = File.ReadAllText(fixturePath);
         var collection = Parse(fixture);
-        var payload = collection.Payload.GetProperty("branches");
-        var shapes = payload.EnumerateArray().SelectMany(branch => branch.GetProperty("items").EnumerateArray())
-            .Where(item => item.ValueKind == JsonValueKind.Object).Select(item => item.GetProperty("kind").GetString());
-        Check(shapes.SequenceEqual(new[] { "point", "line", "polyline", "plane", "box", "triangle-mesh" }), "all v1 kinds");
-        Check(payload[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null, "null slot in wire asset");
-        Check(payload[1].GetProperty("items").GetArrayLength() == 0, "empty wire branch");
-
         var unordered = Parse("""{"schemaVersion":1,"units":"m","space":"project","branches":[{"path":[2,10],"items":[null]},{"path":[2,9],"items":[]},{"path":[2],"items":[]}]}""");
         var sortedPaths = unordered.Payload.GetProperty("branches").EnumerateArray().Select(branch => branch.GetProperty("path").GetRawText());
         Check(sortedPaths.SequenceEqual(new[] { "[2]", "[2,9]", "[2,10]" }), "numeric branch ordering");
         Reject(fixture.Replace("[0, 4]", "[0]"), "Duplicate branch path");
         Reject(fixture.Replace("[1, 2, 3]", "[1e400, 2, 3]"), "finite number");
-        Reject(fixture.Replace("\"kind\": \"line\"", "\"kind\": \"line\", \"itemKey\": \"sample-point\""), "unique within a collection");
         Reject(fixture.Replace("[0, 5]", "[5, 0]"), "strictly increasing");
         Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1, 3]]"), "MESH_INDEX_OUT_OF_RANGE");
         Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1.5, 2]]"), "(triangles[0])");
@@ -48,19 +40,9 @@ internal static class AlidadeChecks
         var cadSource = File.ReadAllText(cadFixture);
         var cad = Parse(cadSource);
         var cadBranches = cad.Payload.GetProperty("branches");
-        var cadShapes = cadBranches.EnumerateArray().SelectMany(branch => branch.GetProperty("items").EnumerateArray())
-            .Where(item => item.ValueKind == JsonValueKind.Object && item.GetProperty("kind").GetString() == "brep-step")
-            .Select(item => item.GetProperty("shapeType").GetString());
-        Check(cadShapes.SequenceEqual(new[] { "solid", "face", "shell" })
-            && cadBranches[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null
-            && cadBranches[1].GetProperty("items").GetArrayLength() == 0, "v2 CAD, null slots and empty branches");
         Reject(cadSource.Replace("\"schemaVersion\": 2", "\"schemaVersion\": 1"), "declared collection version");
         Reject(cadSource.Replace("\"shapeType\": \"solid\"", "\"shapeType\": \"mesh\""), "face, shell or solid");
         Reject(cadSource.Replace("END-ISO-10303-21;", "BROKEN-STEP;"), "INVALID_STEP");
-        var namedCad = JsonNode.Parse(cadSource)!;
-        namedCad["branches"]![0]!["items"]![0]!["name"] = "Fixture housing";
-        Check(Parse(namedCad.ToJsonString()).Payload.GetProperty("branches")[0].GetProperty("items")[0]
-            .GetProperty("name").GetString() == "Fixture housing", "STEP names use the same field as other geometry");
         var initial = cadBranches[0].GetProperty("items")[0].GetProperty("step").GetString()!;
         var withMetadata = initial.Replace("Open CASCADE Shape Model", "/private/source.stp")
             .Replace("'Author'", "'Private; O''Brien'");
@@ -75,7 +57,6 @@ internal static class AlidadeChecks
         managed["branches"]![0]!["items"]![0]!["name"] = "Datum point";
         var managedAsset = Parse(managed.ToJsonString());
         var (geometry, keys, names) = GeometryCollectionConverter.Unpack(managedAsset, 100d, diagnostics, null)!.Value;
-        Check(diagnostics.Count == 0, "unpack diagnostics");
         Check(geometry.PathCount == 3 && geometry.Branches[0][1] == null && geometry.Branches[1].Count == 0, "native GH null and empty branches");
         Check(geometry.Paths[2].Indices.SequenceEqual(new[] { 3, 0, 7 }), "native GH deep path");
         Check(geometry.Branches[0][0] is GH_Point point && point.Value == new Point3d(100, 200, 300), "point in target centimetres");
@@ -85,8 +66,7 @@ internal static class AlidadeChecks
             "native GH name alignment keeps null slots and empty branches");
 
         var roundTrip = GeometryCollectionConverter.Build(geometry, keys, names, 0.01d, diagnostics, null);
-        Check(roundTrip != null && diagnostics.Count == 0, "build diagnostics");
-        Check(Equal(managedAsset.Payload, roundTrip!.Payload),
+        Check(roundTrip != null && diagnostics.Count == 0 && Equal(managedAsset.Payload, roundTrip.Payload),
             "native GH centimetre round trip");
         VerifyGeometryMetadata();
 
@@ -115,19 +95,20 @@ internal static class AlidadeChecks
         ids.Append(new GH_String("point-B"), second);
         names.Append(new GH_String("Fixture A"), first);
         names.Append(new GH_String("Fixture B"), second);
-        VerifyRoundTrip(100, "point-A", "Fixture A", 100, "point-B", "Fixture B");
+        VerifyRoundTrip((100, "point-A", "Fixture A"), (100, "point-B", "Fixture B"));
 
         geometry.Branches[1][0] = new GH_Point(new Point3d(1493, 0, 0));
         ids.Branches[0][0] = new GH_String("point-B");
         ids.Branches[1][0] = new GH_String("point-A");
         names.Branches[0][0] = new GH_String("Fixture B");
         names.Branches[1][0] = new GH_String("Fixture A");
-        VerifyRoundTrip(100, "point-B", "Fixture B", 149.3, "point-A", "Fixture A");
+        VerifyRoundTrip((100, "point-B", "Fixture B"), (149.3, "point-A", "Fixture A"));
 
         names.Branches[1][0] = new GH_String("Fixture B");
-        VerifyRoundTrip(100, "point-B", "Fixture B", 149.3, "point-A", "Fixture B");
-        names.Branches[1][0] = new GH_String(" ");
         var nameDiagnostics = new List<CollectionDiagnostic>();
+        Check(GeometryCollectionConverter.Build(geometry, ids, names, 0.001, nameDiagnostics, null) != null,
+            "display names may repeat");
+        names.Branches[1][0] = new GH_String(" ");
         Check(GeometryCollectionConverter.Build(geometry, ids, names, 0.001, nameDiagnostics, null) == null
             && nameDiagnostics.Single() is { Code: "INVALID_ITEM_NAME", ItemIndex: 0, Path: [7] },
             "blank Geometry Name reports its branch and slot");
@@ -146,22 +127,22 @@ internal static class AlidadeChecks
                 "invalid Geometry ID reports its branch and slot");
         }
 
-        void VerifyRoundTrip(double x1, string id1, string name1, double x2, string id2, string name2)
+        void VerifyRoundTrip(params (double X, string Id, string Name)[] expected)
         {
             var diagnostics = new List<CollectionDiagnostic>();
             var collection = GeometryCollectionConverter.Build(geometry, ids, names, 0.001, diagnostics, null);
             Check(collection != null, "build explicitly identified pieces");
             var (points, returnedIds, returnedNames) = GeometryCollectionConverter.Unpack(collection!, 100d, diagnostics, null)!.Value;
-            Check(diagnostics.Count == 0 && returnedIds.PathCount == 2
-                && returnedIds.Paths[0].Indices.SequenceEqual(first.Indices)
-                && returnedIds.Paths[1].Indices.SequenceEqual(second.Indices)
-                && returnedIds.Branches[0][0].Value == id1 && returnedIds.Branches[1][0].Value == id2
-                && returnedNames.PathCount == 2 && returnedNames.Paths[0].Indices.SequenceEqual(first.Indices)
-                && returnedNames.Paths[1].Indices.SequenceEqual(second.Indices)
-                && returnedNames.Branches[0][0].Value == name1 && returnedNames.Branches[1][0].Value == name2
-                && Math.Abs(((GH_Point)points.Branches[0][0]).Value.X - x1) < 1e-9
-                && Math.Abs(((GH_Point)points.Branches[1][0]).Value.X - x2) < 1e-9,
+            var paths = geometry.Paths.Select(path => path.ToString());
+            Check(diagnostics.Count == 0 && new[] { points.Paths, returnedIds.Paths, returnedNames.Paths }
+                .All(result => result.Select(path => path.ToString()).SequenceEqual(paths)),
                 "geometry, persistent IDs and names share the same returned branches");
+            for (var branch = 0; branch < expected.Length; branch++)
+            {
+                var (x, id, name) = expected[branch];
+                Check(returnedIds.Branches[branch][0].Value == id && returnedNames.Branches[branch][0].Value == name
+                    && Math.Abs(((GH_Point)points.Branches[branch][0]).Value.X - x) < 1e-9, "round-trip geometry identity");
+            }
         }
     }
 

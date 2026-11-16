@@ -15,7 +15,8 @@ internal sealed record CollectionDiagnostic(string Code, string Message, int[]? 
 
 internal sealed class CollectionFormatException : FormatException
 {
-    internal CollectionFormatException(CollectionDiagnostic diagnostic) : base(diagnostic.ToString()) =>
+    internal CollectionFormatException(CollectionDiagnostic diagnostic) : base(diagnostic.Path is { Length: > 0 } path
+        ? $"Branch {{{string.Join(";", path)}}}: {diagnostic}" : diagnostic.ToString()) =>
         Diagnostic = diagnostic;
 
     internal CollectionDiagnostic Diagnostic { get; }
@@ -29,6 +30,8 @@ public sealed class GeometryCollection
 {
     internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     private const double MinimumPlaneAxis = 1e-9;
+    private static readonly string[] ItemFields = { "kind", "itemKey", "name" };
+    private static readonly string[] CurveFields = { "kind", "itemKey", "name", "domain" };
 
     private GeometryCollection(JsonElement payload, int schemaVersion, int branchCount, int count, int geometryCount, bool hasNames)
     {
@@ -120,29 +123,31 @@ public sealed class GeometryCollection
     {
         if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("kind", out var value))
             throw Invalid("Expected a geometry object with a kind.", "kind");
-        switch (Text(value, "kind"))
+        var kind = Text(value, "kind");
+        void ShapeFields(params string[] fields) => Fields(item, fields, kind is "line" or "polyline" ? CurveFields : ItemFields);
+        switch (kind)
         {
             case "point":
-                Fields(item, new[] { "kind", "position" }, "itemKey", "name");
+                ShapeFields("position");
                 Coordinates(item.GetProperty("position"), "position");
                 break;
             case "line":
-                Fields(item, new[] { "kind", "start", "end" }, "itemKey", "name", "domain");
+                ShapeFields("start", "end");
                 if (Coordinates(item.GetProperty("start"), "start") == Coordinates(item.GetProperty("end"), "end"))
                     throw Invalid("A line's endpoints must differ.", "end");
                 CheckDomain(item);
                 break;
             case "polyline":
-                Fields(item, new[] { "kind", "points", "closed" }, "itemKey", "name", "domain");
+                ShapeFields("points", "closed");
                 CheckPolyline(item);
                 CheckDomain(item);
                 break;
             case "plane":
-                Fields(item, new[] { "kind", "origin", "normal", "direction" }, "itemKey", "name");
+                ShapeFields("origin", "normal", "direction");
                 CheckPlane(item);
                 break;
             case "box":
-                Fields(item, new[] { "kind", "plane", "x", "y", "z" }, "itemKey", "name");
+                ShapeFields("plane", "x", "y", "z");
                 var plane = item.GetProperty("plane");
                 Fields(plane, new[] { "origin", "normal", "direction" });
                 CheckPlane(plane);
@@ -150,11 +155,11 @@ public sealed class GeometryCollection
                     Interval(item.GetProperty(axis), axis);
                 break;
             case "triangle-mesh":
-                Fields(item, new[] { "kind", "positions", "triangles" }, "itemKey", "name");
+                ShapeFields("positions", "triangles");
                 CheckMesh(item);
                 break;
             case "brep-step" when schemaVersion == 2:
-                Fields(item, new[] { "kind", "shapeType", "step" }, "itemKey", "name");
+                ShapeFields("shapeType", "step");
                 if (Text(item.GetProperty("shapeType"), "shapeType") is not ("face" or "shell" or "solid"))
                     throw Invalid("Declare a STEP face, shell or solid.", "shapeType");
                 if (!StepText.IsPart21(Text(item.GetProperty("step"), "step")))

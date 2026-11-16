@@ -105,10 +105,8 @@ internal static partial class AlidadeClient
             throw new AlidadeConnectionException(ErrorMessage("PAIRING_REQUIRED"), pairingRequired: true);
         if (!write.Target.Matches(project, "input"))
             throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
-        if (!project.Status.SupportsCollection(write.SchemaVersion))
-            throw new AlidadeConnectionException("The paired project does not offer precise STEP exchange.");
-        if (write.HasNames && !project.Status.GeometryNames)
-            throw new AlidadeConnectionException(ErrorMessage("GEOMETRY_NAMES_UNSUPPORTED"), code: "GEOMETRY_NAMES_UNSUPPORTED");
+        if (project.Status.CollectionWriteError(write.SchemaVersion, write.HasNames) is { } unsupported)
+            throw new AlidadeConnectionException(ErrorMessage(unsupported), code: unsupported);
         if (write.Payload.Length > project.Status.MaxBodyBytes)
             throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
         var receiptPath = ReceiptRoute(write.Id);

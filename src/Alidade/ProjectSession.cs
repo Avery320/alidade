@@ -11,6 +11,8 @@ internal sealed record ProjectStatus(
     string? AvailabilityReason, bool SupportsStep, bool GeometryNames, int MaxBodyBytes)
 {
     internal bool SupportsCollection(int version) => version == 1 || (version == 2 && SupportsStep);
+    internal string? CollectionWriteError(int version, bool hasNames) => !SupportsCollection(version) ? "STEP_UNSUPPORTED"
+        : hasNames && !GeometryNames ? "GEOMETRY_NAMES_UNSUPPORTED" : null;
     internal bool Matches(string projectId, Guid instanceId) => ProjectId == projectId && InstanceId == instanceId;
 }
 

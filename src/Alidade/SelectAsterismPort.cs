@@ -14,7 +14,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     private ProjectSession? _project;
     private IReadOnlyList<GeometryPort>? _items;
     private Binding? _binding;
-    private string? _error;
+    private bool HasPortId => Params.Input[1].SourceCount != 0 || Params.Input[1].VolatileDataCount != 0;
 
     public SelectAsterismPort()
         : base("Select Asterism Port", "Select Port", "Select an Asterism input or output from a Torquetum project.", "Session") { }
@@ -42,31 +42,29 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
         var project = ConnectedProject(data, document);
         if (!ReferenceEquals(project, _project))
         {
-            CancelRequest();
             _project = project;
-            _items = null;
-            _error = null;
             LoadList();
         }
 
-        var byId = Params.Input[1].VolatileDataCount != 0 || Params.Input[1].SourceCount != 0;
+        var byId = HasPortId;
         var binding = byId ? null : _binding;
         var portId = byId ? SingleInput<string>(data, 1) : binding?.PortId;
+        var error = Failure?.Message;
 
         string status;
-        if (project == null) status = "Connect to Torquetum first.";
+        if (project == null) status = "Connect Project";
         else if (binding != null && binding.ProjectId != project.Status.ProjectId)
-            status = "This port is saved for another project. Pair with that project or choose a new port.";
-        else if (IsPending) status = "Reading Asterism ports…";
-        else if (_error != null) status = _error;
-        else if (_items == null) status = "Use Refresh list to read Asterism ports.";
-        else if (byId && string.IsNullOrWhiteSpace(portId)) status = "Provide one Asterism port ID.";
-        else if (portId == null) status = _items.Count == 0 ? "No Asterism exchange ports." : "Choose a port from the component menu.";
+            status = error = "This port belongs to another project. Pair again or choose a new port.";
+        else if (IsPending) status = "Loading ports…";
+        else if (error != null) status = error;
+        else if (_items == null) status = "Refresh port list";
+        else if (byId && string.IsNullOrWhiteSpace(portId)) status = "Connect one Port ID";
+        else if (portId == null) status = _items.Count == 0 ? "No exchange ports" : "Choose a port";
         else
         {
             var item = _items.FirstOrDefault(candidate => candidate.Id == portId
                 && (binding == null || candidate.Direction == binding.Direction));
-            if (item == null) status = AlidadeClient.ErrorMessage("PORT_NOT_FOUND");
+            if (item == null) status = error = AlidadeClient.ErrorMessage("PORT_NOT_FOUND");
             else
             {
                 var target = item.Reference(project.Status);
@@ -74,7 +72,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
                 status = $"{target.DisplayName} ({target.Direction})";
             }
         }
-        ReportStatus(data, 1, status, _error);
+        ReportStatus(data, 1, status, error);
     }
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
@@ -83,8 +81,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
         var document = OnPingDocument();
         var enabled = !IsPending && CanUseProject(document, _project);
         Menu_AppendItem(menu, "Refresh list", (_, _) => LoadList(), enabled);
-        if (!enabled || _items == null || _project is not { } project
-            || Params.Input[1].SourceCount != 0 || Params.Input[1].VolatileDataCount != 0)
+        if (!enabled || _items == null || _project is not { } project || HasPortId)
             return;
 
         var list = new ToolStripMenuItem("Asterism ports");
@@ -100,9 +97,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     private void Select(ProjectSession project, Binding binding)
     {
         var document = OnPingDocument();
-        if (!ReferenceEquals(_project, project) || !CanUseProject(document, project))
-            return;
-        if (_binding == binding)
+        if (_binding == binding || !ReferenceEquals(_project, project) || !CanUseProject(document, project))
             return;
         RecordUndoEvent("Select Asterism port");
         _binding = binding;
@@ -113,19 +108,17 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     {
         var document = OnPingDocument();
         var project = _project;
-        if (IsPending || !CanUseProject(document, project))
-            return;
-        _error = null;
         _items = null;
-        StartRequest(document, project, cancellation => AlidadeClient.ListPortsAsync(project, document.RuntimeID, cancellation),
-            items => _items = items, error => _error = error.Message);
+        if (CanUseProject(document, project))
+            StartRequest(document, project, cancellation => AlidadeClient.ListPortsAsync(project, document.RuntimeID, cancellation),
+                items => _items = items);
+        else CancelRequest();
     }
 
     protected override void ResetState()
     {
         _project = null;
         _items = null;
-        _error = null;
     }
 
     public override bool Write(GH_IWriter writer)

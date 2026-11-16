@@ -4,26 +4,6 @@ Alidade 是 Torquetum 的 Grasshopper 外掛專案，目標是在 Rhino／Grassh
 
 Alidade is a Grasshopper plugin project for exchanging geometry and data trees with Torquetum.
 
-## 開發範圍
-
-- 透過 TOR API 連線至指定的 Torquetum 專案。
-- 將 Grasshopper 的幾何送進 Asterism 的圖輸入，並讀取圖輸出。
-- 保留資料樹的分支路徑與項目順序，讓兩邊的結果可以接入後續運算。
-
-## 專案狀態
-
-`Alidade.gha` 提供 **Connect to Torquetum** 元件。在已啟用 Alidade 的本機 Torquetum 專案複製配對碼，再按 Grasshopper 畫布上的 **Pair with Torquetum**。如果 Rhino 沒有取得可用的剪貼簿內容，可將配對碼貼進開啟的視窗。元件顯示專案和讀寫權限。使用元件選單的 **Refresh status** 查詢目前狀態，或用 **Disconnect** 關閉連線。重開 Grasshopper 定義後須重新配對。
-
-用 **Build Geometry Collection** 將 Rhino 點、線、折線、平面、盒與網格整理成集合，用 **Unpack Geometry Collection** 取回原生幾何。兩個元件都保留資料樹路徑、空分支和 null 槽。單位可在元件中指定，省略時讀取 Grasshopper 文件關聯的 Rhino 模型單位。此轉換可離線操作。
-
-用 **Geometry IDs**（`K`）傳入與幾何相同路徑、相同槽位的文字樹。更新同一件幾何時沿用相同 ID，即使位置、順序或分支改變。Torquetum 會為省略 ID 的幾何配發新 ID。從 Asterism 讀回時，**Unpack Geometry Collection** 在 `K` 輸出每件幾何對應的 ID。
-
-用 **Geometry Names**（`N`）為每件幾何設定可閱讀的名稱。接線時使用與幾何相同路徑、相同槽位的文字樹。名稱可以重複或修改，省略時由 Torquetum 使用該件的幾何 ID。**Unpack Geometry Collection** 在 `N` 依原路徑及槽位輸出讀回的名稱。
-
-支援 v2 的 Project 可交換單一連通的 STEP 面、殼與實體。兩個轉換元件透過 Rhino STEP 工具處理，單獨的 NURBS 曲線仍會回報目前不可精確交換。
-
-**Select Asterism Port** 選取圖上的幾何輸入或輸出。**Send Geometry** 在執行選單中的 **Send** 時將 Collection 傳給所選輸入。**Read Geometry** 將所選圖輸出讀成 Collection。若傳送待確認，可查回執或重試原請求。Grasshopper 重算只更新傳送元件的輸入狀態。
-
 ## 本機建置
 
 從儲存庫根目錄使用 .NET SDK 7 以上版本執行下列指令。NuGet 會取得固定版本的 Rhino 8.6 SDK，執行外掛時由 Rhino 提供 Grasshopper 和 RhinoCommon。
@@ -38,13 +18,14 @@ dotnet build src/Alidade/Alidade.csproj --configuration Release
 
 將建置產物 `Alidade.gha` 複製到 Grasshopper 載入第三方元件的資料夾，或把建置目錄加入 Rhino 的 `GrasshopperDeveloperSettings`。重新啟動 Rhino，開啟 Grasshopper，從 **Alidade** 分類加入元件。Rhino 與 Torquetum Desktop 或本機 Web 需在同一台電腦執行。 [McNeel Grasshopper 組件目錄說明](https://developer.rhino3d.com/api/gh1/type/grasshopper.folders/)
 
-1. 在 Torquetum 開啟測試專案，在 Asterism 新增 **Geometry Input** 與 **Geometry Output**，並把前者右側的 `Geometry` 接到後者左側的 `Geometry`。可在節點編輯 `Name`，方便從 Grasshopper 選取。
-2. 在 **Project Settings** 選擇 **Create read-write invitation** 並複製配對碼。按 Grasshopper 畫布上的 **Pair with Torquetum**。若開啟輸入視窗，貼上配對碼並確認。將 `Project` 接到兩個 **Select Asterism Port**，以及 **Send Geometry** 與 **Read Geometry**。
-3. 在公釐 Rhino 文件準備 `{0}` 的點 `(1000, 0, 0)` 和線段，接到 **Build Geometry Collection**，再將 `Collection` 接到 **Send Geometry**。在第一個 Select 的 **Asterism ports** 選擇圖輸入，將 `Port Ref` 接到 Send 的 `Target`，執行 **Send**，並在 Asterism 預覽幾何。
-4. 在第二個 Select 選擇圖輸出，將 `Port Ref` 接到 **Read Geometry**，再將 `Collection` 接到 **Unpack Geometry Collection**。填入 `Target units = cm`，點的 X 座標應為 100，分支及槽位應與來源一致。修改來源點後再次執行 **Send**，並在 Read 選 **Refresh read** 取得新結果。
-5. 若其他用戶端更新了輸入，在 Select 選 **Refresh list** 後再次送出。若回執未確定，使用 **Check result** 或 **Retry same request**。重新打開 Torquetum 專案後需重新配對並傳入資料。若要將圖中的結果保存成 Station 幾何，可在 Asterism 執行 Bake。
+1. 在 Asterism 放置 **Geometry Input** 和 **Geometry Output**，接通中間的 `Geometry`。
+2. 在 Torquetum 的 **Project Settings** 按 **Copy Grasshopper pairing code**，再按 Grasshopper 的 **Pair with Torquetum**。若出現視窗，貼上配對碼。把 `Project` 接到兩個 Select、Send 與 Read。
+3. 從兩個 **Select Asterism Port** 的 **Asterism ports** 選單分別選取 Input 和 Output。將 Input 接到 **Send Geometry**，將 Output 接到 **Read Geometry**。
+4. 透過 **Build Geometry Collection** 將 Rhino 幾何接入 Send，使用 **Send** 或按下接至其 `Send` 腳位的 Grasshopper Button。把 Send 的 `Receipt` 接到 Read 可取得指定寫入的結果，把 Read 的 `Collection` 接到 **Unpack Geometry Collection** 取回幾何。
 
-CAD 能力依配對的 `collectionVersions` 和 `kinds` 決定。可用兩份共用 JSON 測試資料確認交換格式。 [v1 基礎幾何](contracts/alidade/v1/fixtures/geometry-collection.json) · [v2 STEP 面、殼與實體](contracts/alidade/v2/fixtures/geometry-collection.json)
+Build 和 Unpack 支援點、線、折線、平面、盒與網格。v2 另支援 STEP 面、殼與實體。轉換可離線操作，省略長度單位時使用 Rhino 模型單位。`Geometry IDs`（`K`）和 `Geometry Names`（`N`）是與幾何對齊的文字樹。重排時保留原 ID，名稱可修改。省略 ID 時由 Torquetum 配發，省略名稱時顯示 ID。
+
+重新開檔後需配對。若其他用戶端更新了 Input，在 Select 執行 **Refresh list**。送出待確認時用 **Check result** 或 **Retry same request**。要將幾何儲存到 Station，請在 Asterism 執行 Bake。
 
 ## 本機驗收
 

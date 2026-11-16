@@ -14,7 +14,6 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
 
     private Input? _input;
     private GeometryCollection? _collection;
-    private string? _error;
 
     public ReadGeometry()
         : base("Read Geometry", "Read Geometry", "Read a Geometry Collection from an Asterism output.", "Exchange") { }
@@ -44,10 +43,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
         var (next, unavailable) = Capture(data, project);
         if (_input != next)
         {
-            CancelRequest();
             _input = next;
-            _collection = null;
-            _error = null;
             Refresh();
         }
 
@@ -56,31 +52,32 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
             data.SetData(0, new AlidadeCollection(current));
             data.SetData(1, new AlidadePortReference(input.Target));
         }
-        var status = _error ?? (IsPending ? "Waiting for Asterism output…" : unavailable);
+        var error = Failure?.Message;
+        var status = error ?? (IsPending ? "Reading…" : unavailable);
         if (_collection != null && _input is { } completed)
             status = completed.Receipt?.RequestId is { } id
-                ? $"{completed.Target.DisplayName} · write {id.ToString("D")[^8..]}"
+                ? $"Read {id.ToString("D")[^8..]}"
                 : completed.Target.DisplayName;
-        ReportStatus(data, 2, status, _error);
+        ReportStatus(data, 2, status, error);
     }
 
     private (Input?, string) Capture(IGH_DataAccess data, ProjectSession? project)
     {
         if (project == null)
-            return (null, "Connect to Torquetum first.");
+            return (null, "Connect Project");
         if (ConnectedPort(data, 1, project, "output") is not { } target)
-            return (null, "Select an Asterism output in the connected project.");
-        if (Params.Input.Count <= 2 || Params.Input[2].SourceCount == 0)
+            return (null, "Choose Output");
+        if (Params.Input[2].SourceCount == 0)
             return (new Input(project, target, null), target.DisplayName);
         if (SingleInput<AlidadeWriteReceipt>(data, 2)?.Value is not { } receipt)
-            return (null, "Waiting for a Send receipt.");
+            return (null, "Waiting for receipt");
         if (!receipt.Matches(project))
             return (null, "This receipt belongs to another project connection.");
         return receipt.State switch
         {
             "committed" => (new Input(project, target, receipt), target.DisplayName),
-            "pending" => (null, "Waiting for the Input write to finish."),
-            _ => (null, receipt.Message),
+            "pending" => (null, "Waiting for Input"),
+            _ => (null, "Input write rejected"),
         };
     }
 
@@ -94,14 +91,11 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
     private void Refresh()
     {
         var document = OnPingDocument();
-        if (IsPending || _input is not { } input || !CanUseProject(document, input.Project))
-            return;
-
         _collection = null;
-        _error = null;
-        StartRequest(document, input.Project,
-            cancellation => ReadOutputAsync(input, document.RuntimeID, cancellation),
-            result => _collection = result, error => _error = error.Message);
+        if (_input is { } input && CanUseProject(document, input.Project))
+            StartRequest(document, input.Project, cancellation => ReadOutputAsync(input, document.RuntimeID, cancellation),
+                result => _collection = result);
+        else CancelRequest();
     }
 
     private static async Task<GeometryCollection> ReadOutputAsync(Input input, ulong documentId, CancellationToken cancellation)
@@ -126,7 +120,6 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
     {
         _input = null;
         _collection = null;
-        _error = null;
     }
 
     public override bool Read(GH_IReader reader)

@@ -18,6 +18,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
         : base(name, nickname, description, "Alidade", category) { }
 
     protected bool IsPending => _operation != null;
+    private protected AlidadeConnectionException? Failure { get; private set; }
     protected bool CanUse([NotNullWhen(true)] GH_Document? document) => document?.Enabled == true && !Locked;
 
     protected bool CanUseProject([NotNullWhen(true)] GH_Document? document,
@@ -30,21 +31,20 @@ public abstract class AlidadeAsyncComponent : GH_Component
     }
 
     protected ProjectSession? ConnectedProject(IGH_DataAccess data, GH_Document? document) =>
-        document != null && SingleInput<AlidadeProject>(data, 0)?.Value is { } session
-            && session.IsValidFor(document.RuntimeID) ? session : null;
+        SingleInput<AlidadeProject>(data, 0)?.Value is { } session && CanUseProject(document, session) ? session : null;
 
     protected GeometryPortReference? ConnectedPort(IGH_DataAccess data, int index, ProjectSession project, string direction) =>
         SingleInput<AlidadePortReference>(data, index)?.Value is { } port && port.Matches(project, direction) ? port : null;
 
     protected void ReportStatus(IGH_DataAccess data, int index, string status, string? warning)
     {
-        Message = status;
+        Message = warning == status ? "" : status;
         data.SetData(index, status);
         if (warning != null) AddRuntimeMessage(GH_RuntimeMessageLevel.Warning, warning);
     }
 
     internal void StartRequest<T>(GH_Document document, ProjectSession? project, Func<CancellationToken, Task<T>> request,
-        Action<T> accept, Action<AlidadeConnectionException> fail, Action<T>? abandon = null)
+        Action<T> accept, Action<AlidadeConnectionException>? fail = null, Action<T>? abandon = null)
     {
         CancelRequest();
         var operation = new CancellationTokenSource();
@@ -54,41 +54,34 @@ public abstract class AlidadeAsyncComponent : GH_Component
     }
 
     private async Task CompleteAsync<T>(GH_Document document, ProjectSession? project, CancellationTokenSource operation,
-        Func<CancellationToken, Task<T>> request, Action<T> accept, Action<AlidadeConnectionException> fail, Action<T>? abandon)
+        Func<CancellationToken, Task<T>> request, Action<T> accept, Action<AlidadeConnectionException>? fail, Action<T>? abandon)
     {
         T result = default!;
         AlidadeConnectionException? error = null;
         try { result = await request(operation.Token).ConfigureAwait(false); }
-        catch (AlidadeConnectionException expected) { error = expected; }
-        catch (HttpRequestException)
+        catch (Exception failure) when (failure is AlidadeConnectionException or HttpRequestException
+            or OperationCanceledException or CollectionFormatException or JsonException)
         {
-            error = new AlidadeConnectionException("Torquetum is unavailable. Check the running project and try again.");
-        }
-        catch (OperationCanceledException)
-        {
-            error = new AlidadeConnectionException("Torquetum did not answer in time. Check the request before trying again.");
-        }
-        catch (CollectionFormatException invalid)
-        {
-            var diagnostic = invalid.Diagnostic;
-            var branch = diagnostic.Path is { Length: > 0 } path ? $"Branch {{{string.Join(";", path)}}}: " : "";
-            error = new AlidadeConnectionException(branch + diagnostic);
-        }
-        catch (JsonException)
-        {
-            error = new AlidadeConnectionException("Torquetum returned invalid exchange data.");
+            error = failure as AlidadeConnectionException ?? new AlidadeConnectionException(failure switch
+            {
+                HttpRequestException => "Torquetum is unavailable. Check the running project and try again.",
+                OperationCanceledException => "Torquetum did not answer in time. Check the request before trying again.",
+                CollectionFormatException invalid => invalid.Message,
+                _ => "Torquetum returned invalid exchange data.",
+            });
         }
 
         EtoApplication.Instance.AsyncInvoke(() =>
         {
+            var current = ReferenceEquals(_operation, operation);
+            if (current) _operation = null;
             operation.Dispose();
-            if (!ReferenceEquals(_operation, operation) || !ReferenceEquals(OnPingDocument(), document))
+            if (!current || !ReferenceEquals(OnPingDocument(), document))
             {
                 if (error == null) abandon?.Invoke(result);
                 return;
             }
 
-            _operation = null;
             if (error == null && project != null && !project.IsValidFor(document.RuntimeID))
                 error = new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
             if (error == null)
@@ -97,7 +90,8 @@ public abstract class AlidadeAsyncComponent : GH_Component
             {
                 if (error.PairingRequired)
                     project?.Disconnect();
-                fail(error);
+                Failure = error;
+                fail?.Invoke(error);
             }
             RequestSolution(document);
         });
@@ -107,6 +101,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
     {
         var operation = _operation;
         _operation = null;
+        Failure = null;
         operation?.Cancel();
     }
 

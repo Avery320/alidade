@@ -11,11 +11,9 @@ namespace Torquetum.Alidade;
 
 public sealed class ConnectToTorquetum : AlidadeAsyncComponent
 {
-    private const string Waiting = "Waiting for pairing";
     private const string PairAction = "Pair with Torquetum";
 
     private ProjectSession? _session;
-    private (string Message, string? Warning)? _failure;
 
     public ConnectToTorquetum()
         : base("Connect to Torquetum", "Connect", "Pair with a running Torquetum project.", "Session") { }
@@ -35,94 +33,76 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
     protected override void SolveInstance(IGH_DataAccess data)
     {
         var document = OnPingDocument();
-        if (_session is { } session && document != null && !session.IsValidFor(document.RuntimeID))
+        var session = _session;
+        if (session != null && (document == null || !session.IsValidFor(document.RuntimeID)))
         {
             ResetState();
-            _failure = ("Pair with the project again.", null);
+            session = null;
         }
-        var (status, warning) = IsPending
-            ? (_session == null ? "Pairing with Torquetum…" : "Checking the connection…", null)
-            : _failure ?? (_session == null ? (Waiting, null) : ShowConnection(data, _session));
-        ReportStatus(data, 1, status, warning);
+        if (IsPending || session == null || Failure != null)
+        {
+            var error = Failure?.Message;
+            ReportStatus(data, 1, error ?? (IsPending ? "Connecting…" : "Waiting for pairing"), error);
+            return;
+        }
+
+        data.SetData(0, new AlidadeProject(session));
+        var project = session.Status;
+        var access = !project.CanRead ? "unavailable" : project.CanWrite ? "read/write" : "read-only";
+        var warning = !project.CanRead || project.AvailabilityReason == "PROJECT_BUSY"
+            ? AlidadeClient.ErrorMessage(project.AvailabilityReason ?? "PROJECT_BUSY") : null;
+        ReportStatus(data, 1, $"{project.ProjectName} ({access})", warning);
     }
 
     protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
     {
         base.AppendAdditionalComponentMenuItems(menu);
-        var enabled = CanUse(OnPingDocument());
-        Menu_AppendItem(menu, PairAction, (_, _) => Pair(), enabled && !IsPending);
+        var enabled = CanUse(OnPingDocument()) && !IsPending;
+        Menu_AppendItem(menu, PairAction, (_, _) => Pair(), enabled);
         Menu_AppendItem(menu, "Refresh status", (_, _) => Refresh(), enabled && _session?.IsValid == true);
         Menu_AppendItem(menu, "Disconnect", (_, _) => Disconnect(), _session != null || IsPending);
     }
 
-    private void Pair()
+    private void Pair(bool paste = false, string? reason = null)
     {
         var document = OnPingDocument();
         if (IsPending || !CanUse(document))
             return;
 
-        var code = EtoClipboard.Instance.Text?.Trim() ?? "";
-        if (AlidadeClient.HasInvitationPrefix(code))
-            BeginPair(document, code, fromClipboard: true);
-        else
-            PromptForPairingCode(document);
-    }
+        var code = paste ? "" : EtoClipboard.Instance.Text?.Trim() ?? "";
+        var fromClipboard = AlidadeClient.HasInvitationPrefix(code);
+        if (!fromClipboard)
+        {
+            const string prompt = "Paste the pairing code from Torquetum Project Settings.";
+            if (!Rhino.UI.Dialogs.ShowEditBox(PairAction, reason == null ? prompt : $"{reason}\n\n{prompt}", "", false, out code)
+                || !ReferenceEquals(OnPingDocument(), document) || !CanUse(document) || IsPending)
+                return;
+        }
 
-    private void PromptForPairingCode(GH_Document document, string? failure = null)
-    {
-        var message = "Paste the pairing code from Torquetum Project Settings.";
-        if (failure != null) message = failure + "\n\n" + message;
-        if (Rhino.UI.Dialogs.ShowEditBox(PairAction, message, "", false, out var code)
-            && ReferenceEquals(OnPingDocument(), document) && CanUse(document) && !IsPending)
-            BeginPair(document, code, fromClipboard: false);
-    }
-
-    private void BeginPair(GH_Document document, string code, bool fromClipboard)
-    {
         ResetState();
         StartRequest(document, null, cancellation => AlidadeClient.PairAsync(code, document.RuntimeID, cancellation),
             session => _session = session,
             error =>
             {
-                ShowFailure(error);
                 if (fromClipboard && error.Code == "INVITE_INVALID")
-                    PromptForPairingCode(document, error.Message);
-            }, session => session.Disconnect());
+                    Pair(paste: true, reason: error.Message);
+            }, abandon: session => session.Disconnect());
     }
 
     private void Refresh()
     {
         var document = OnPingDocument();
-        if (!CanUse(document) || _session is not { } session)
+        if (IsPending || !CanUseProject(document, _session))
             return;
 
-        _failure = null;
+        var session = _session;
         StartRequest(document, session, cancellation => AlidadeClient.ReadProjectAsync(session, document.RuntimeID, cancellation),
-            status => session.Status = status, ShowFailure);
-    }
-
-    private static (string, string?) ShowConnection(IGH_DataAccess data, ProjectSession session)
-    {
-        data.SetData(0, new AlidadeProject(session));
-        var project = session.Status;
-        var status = project.CanRead
-            ? $"{project.ProjectName} ({(project.CanWrite ? "read/write" : "read-only")})"
-            : $"{project.ProjectName} (unavailable)";
-        var warning = !project.CanRead || project.AvailabilityReason == "PROJECT_BUSY"
-            ? (project.AvailabilityReason is { } reason ? AlidadeClient.ErrorMessage(reason) : "The Torquetum project is not ready for reading.")
-            : null;
-        return (status, warning);
-    }
-
-    private void ShowFailure(AlidadeConnectionException error)
-    {
-        if (error.PairingRequired)
-            ResetState();
-        _failure = (error.Message, error.Message);
+            status => session.Status = status);
     }
 
     private void Disconnect()
     {
+        CancelRequest();
         ResetState();
         if (OnPingDocument() is { } document)
             RequestSolution(document);
@@ -130,10 +110,8 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
 
     protected override void ResetState()
     {
-        CancelRequest();
         _session?.Disconnect();
         _session = null;
-        _failure = null;
     }
 
     private sealed class ConnectAttributes : GH_ComponentAttributes

@@ -35,7 +35,7 @@ internal static class CollectionOutputs
         {
             var first = diagnostics.FirstOrDefault(item => !item.Warning) ?? diagnostics[0];
             component.AddRuntimeMessage(first.Warning ? GH_RuntimeMessageLevel.Warning : GH_RuntimeMessageLevel.Error,
-                first + (diagnostics.Count > 1 ? " See Diagnostics for all affected items." : ""));
+                first.ToString());
         }
     }
 }
@@ -78,7 +78,6 @@ public sealed class BuildGeometryCollection : GH_Component
 
     protected override void SolveInstance(IGH_DataAccess data)
     {
-        Message = "";
         var diagnostics = new List<CollectionDiagnostic>();
         try
         {
@@ -92,10 +91,7 @@ public sealed class BuildGeometryCollection : GH_Component
             var collection = GeometryCollectionConverter.Build(geometry ?? new GH_Structure<IGH_Goo>(),
                 OptionalTextTree(data, 1), OptionalTextTree(data, 3), scale, diagnostics, document);
             if (collection != null)
-            {
-                Message = collection.ToString();
                 data.SetData(0, new AlidadeCollection(collection));
-            }
         }
         catch (CollectionFormatException error)
         {
