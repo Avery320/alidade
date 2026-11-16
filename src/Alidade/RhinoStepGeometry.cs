@@ -11,7 +11,6 @@ namespace Torquetum.Alidade;
 
 internal static class StepText
 {
-    internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     internal static readonly UTF8Encoding Utf8 = new(false, true);
     private const string FileName = "FILE_NAME('Alidade.stp','2000-01-01T00:00:00',(''),(''),'Alidade','Rhino','')";
     private static readonly Regex FileNameStatement = new(
@@ -20,14 +19,14 @@ internal static class StepText
 
     internal static bool IsPart21(string value)
     {
-        if (value.Length == 0 || value.Length > MaxExchangeBytes || value.Contains('\0'))
+        if (value.Length == 0 || value.Length > GeometryCollection.MaxExchangeBytes || value.Contains('\0'))
             return false;
         var text = value.AsSpan().Trim();
         try
         {
             return text.StartsWith("ISO-10303-21;", StringComparison.Ordinal)
                 && text.EndsWith("END-ISO-10303-21;", StringComparison.Ordinal)
-                && Utf8.GetByteCount(value) <= MaxExchangeBytes;
+                && Utf8.GetByteCount(value) <= GeometryCollection.MaxExchangeBytes;
         }
         catch (EncoderFallbackException) { return false; }
     }
@@ -75,7 +74,7 @@ internal static class RhinoStepGeometry
                 }))
                 throw CollectionFormatException.At("STEP_EXPORT_FAILED", "Rhino could not export this shape as STEP.", "step");
             var file = new FileInfo(path);
-            if (file.Length > StepText.MaxExchangeBytes)
+            if (file.Length > GeometryCollection.MaxExchangeBytes)
                 throw CollectionFormatException.At("CONTENT_TOO_LARGE", "The native STEP document exceeds the transfer limit.", "step");
             var text = StepText.SanitizeExport(File.ReadAllText(path, StepText.Utf8));
             if (text.Contains(path, StringComparison.Ordinal))

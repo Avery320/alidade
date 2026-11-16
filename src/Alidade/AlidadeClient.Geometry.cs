@@ -71,7 +71,7 @@ internal static partial class AlidadeClient
         if (!StrongTag(tag))
             throw new JsonException();
         var payload = await ReadJsonAsync<JsonElement>(response, cancellation).ConfigureAwait(false);
-        var collection = GeometryCollection.Parse(payload);
+        var collection = GeometryCollection.FromOwnedPayload(payload);
         if (!project.Status.SupportsCollection(collection.SchemaVersion))
             throw new AlidadeConnectionException("The paired project did not negotiate this collection format.");
         return new GeometrySnapshot(collection, target with { ETag = tag! });
@@ -89,7 +89,7 @@ internal static partial class AlidadeClient
         var payload = target == null
             ? JsonSerializer.SerializeToUtf8Bytes(new { name = name.Trim(), collection = collection.Payload }, JsonOptions)
             : JsonSerializer.SerializeToUtf8Bytes(new { collection = collection.Payload }, JsonOptions);
-        if (payload.Length > StepText.MaxExchangeBytes)
+        if (payload.Length > GeometryCollection.MaxExchangeBytes)
             throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
         return new GeometryWriteRequest(Guid.NewGuid(), target?.EntityId, target?.ETag, collection.SchemaVersion, payload);
     }

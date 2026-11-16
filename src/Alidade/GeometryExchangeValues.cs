@@ -25,12 +25,12 @@ public sealed record GeometryReceipt(Guid RequestId, string ProjectId, Guid Inst
 public sealed class AlidadeGeometryRef : GH_Goo<GeometryReference?>
 {
     public AlidadeGeometryRef() { }
-    internal AlidadeGeometryRef(GeometryReference target) : base(target) { }
+    internal AlidadeGeometryRef(GeometryReference? target) : base(target) { }
 
     public override bool IsValid => Value is { InstanceId: var id } && id != Guid.Empty;
     public override string TypeName => "Alidade Geometry Reference";
     public override string TypeDescription => "A Station geometry at an observed revision in a live Torquetum project.";
-    public override IGH_Goo Duplicate() => Value is { } target ? new AlidadeGeometryRef(target) : new AlidadeGeometryRef();
+    public override IGH_Goo Duplicate() => new AlidadeGeometryRef(Value);
     public override string ToString() => Value?.Name ?? "No geometry selected";
 
     public override bool Write(GH_IWriter writer) => true;
@@ -53,12 +53,12 @@ public sealed class AlidadeGeometryRefParameter : GH_Param<AlidadeGeometryRef>
 public sealed class AlidadeWriteReceipt : GH_Goo<GeometryReceipt?>
 {
     public AlidadeWriteReceipt() { }
-    internal AlidadeWriteReceipt(GeometryReceipt receipt) : base(receipt) { }
+    internal AlidadeWriteReceipt(GeometryReceipt? receipt) : base(receipt) { }
 
     public override bool IsValid => Value != null;
     public override string TypeName => "Alidade Write Receipt";
     public override string TypeDescription => "The outcome of an Alidade Create or Replace request.";
-    public override IGH_Goo Duplicate() => Value is { } receipt ? new AlidadeWriteReceipt(receipt) : new AlidadeWriteReceipt();
+    public override IGH_Goo Duplicate() => new AlidadeWriteReceipt(Value);
     public override string ToString() => Value?.ToString() ?? "No receipt";
 
     public override bool Write(GH_IWriter writer) => true;

@@ -40,6 +40,9 @@ Reject(fixture.Replace("[1, 2, 3]", "[1e400, 2, 3]"), "finite number");
 Reject(fixture.Replace("\"kind\": \"line\"", "\"kind\": \"line\", \"itemKey\": \"sample-point\""), "unique within a collection");
 Reject(fixture.Replace("[0, 5]", "[5, 0]"), "strictly increasing");
 Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1, 3]]"), "MESH_INDEX_OUT_OF_RANGE");
+Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1.5, 2]]"), "(triangles[0])");
+Reject("""{"schemaVersion":1,"units":"m","space":"project","branches":[{"path":[0],"items":[{"kind":"polyline","points":[[0,0,0],[1,0,0],[0,0,0],[1,0,0]],"closed":true}]}]}""",
+    "three distinct vertices");
 Reject(fixture.Replace("\"closed\": true", "\"closed\": 1"), "Boolean closure");
 
 var cadFixture = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[1]))!, "..", "..", "v2", "fixtures", "geometry-collection.json");

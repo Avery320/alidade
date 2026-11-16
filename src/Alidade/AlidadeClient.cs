@@ -21,7 +21,7 @@ internal static partial class AlidadeClient
     })
     {
         Timeout = Timeout.InfiniteTimeSpan,
-        MaxResponseContentBufferSize = StepText.MaxExchangeBytes,
+        MaxResponseContentBufferSize = GeometryCollection.MaxExchangeBytes,
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -210,8 +210,8 @@ internal static partial class AlidadeClient
             var step = Array.Exists(CollectionVersions, version => version == 2)
                 && Kinds != null && Array.Exists(Kinds, kind => kind == "brep-step");
             var bytes = Limits?.MaxBodyBytes is > 0 and var advertised
-                ? Math.Min(advertised, StepText.MaxExchangeBytes)
-                : step ? StepText.MaxExchangeBytes : 8 * 1024 * 1024;
+                ? Math.Min(advertised, GeometryCollection.MaxExchangeBytes)
+                : step ? GeometryCollection.MaxExchangeBytes : 8 * 1024 * 1024;
             return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason, step, bytes);
         }
     }

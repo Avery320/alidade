@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 using Grasshopper.Kernel;
-using GH_IO.Serialization;
 
 namespace Torquetum.Alidade;
 
@@ -11,7 +10,6 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
 {
     private ProjectSession? _project;
     private IReadOnlyList<GeometryListing>? _items;
-    private string? _selectedProject;
     private string? _selection;
     private Guid _selectedInstance;
     private string? _error;
@@ -53,8 +51,7 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
         string? entityId = null;
         if (byId && Params.Input[1].VolatileDataCount == 1)
             data.GetData(1, ref entityId);
-        else if (!byId && project != null && _selectedProject == project.Status.ProjectId
-            && _selectedInstance == project.Status.InstanceId)
+        else if (!byId && project != null && _selectedInstance == project.Status.InstanceId)
             entityId = _selection;
 
         if (project == null) status = "Connect to Torquetum first.";
@@ -106,7 +103,6 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
         if (document == null || !CanUse(document) || !ReferenceEquals(_project, project) || !project.IsValidFor(document.RuntimeID))
             return;
         _selection = id;
-        _selectedProject = project.Status.ProjectId;
         _selectedInstance = project.Status.InstanceId;
         RequestSolution(document);
     }
@@ -123,29 +119,12 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
             items => _items = items, error => _error = error.Message);
     }
 
-    public override bool Write(GH_IWriter writer)
-    {
-        if (_selectedProject != null && _selection != null)
-        {
-            writer.SetString("SelectedProject", _selectedProject);
-            writer.SetString("SelectedGeometry", _selection);
-        }
-        return base.Write(writer);
-    }
-
-    public override bool Read(GH_IReader reader)
-    {
-        var result = base.Read(reader);
-        _selectedProject = reader.ItemExists("SelectedProject") ? reader.GetString("SelectedProject") : null;
-        _selection = reader.ItemExists("SelectedGeometry") ? reader.GetString("SelectedGeometry") : null;
-        return result;
-    }
-
     protected override void ResetState()
     {
         _project = null;
         _items = null;
         _selectedInstance = Guid.Empty;
+        _selection = null;
         _error = null;
     }
 }

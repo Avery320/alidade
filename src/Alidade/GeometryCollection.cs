@@ -27,6 +27,7 @@ internal sealed class CollectionFormatException : FormatException
 /// <summary>An immutable geometry tree in Project coordinates and metres.</summary>
 public sealed class GeometryCollection
 {
+    internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     private const double MinimumPlaneAxis = 1e-9;
 
     private GeometryCollection(JsonElement payload, int schemaVersion, int branchCount, int count, int geometryCount)
@@ -46,7 +47,12 @@ public sealed class GeometryCollection
 
     public override string ToString() => $"{BranchCount} branches, {SlotCount} slots, {GeometryCount} geometries";
 
-    public static GeometryCollection Parse(JsonElement payload)
+    public static GeometryCollection Parse(JsonElement payload) => Validate(payload, copy: true);
+
+    // Serializer-produced elements own their storage. Elements from a caller's JsonDocument may be borrowed.
+    internal static GeometryCollection FromOwnedPayload(JsonElement payload) => Validate(payload, copy: false);
+
+    private static GeometryCollection Validate(JsonElement payload, bool copy)
     {
         Fields(payload, new[] { "schemaVersion", "units", "space", "branches" });
         var schemaVersion = Integer(payload.GetProperty("schemaVersion"), "schemaVersion");
@@ -100,7 +106,9 @@ public sealed class GeometryCollection
             branches.Sort((left, right) => left.Path.AsSpan().SequenceCompareTo(right.Path));
             payload = Snapshot(branches.Select(branch => branch.Value), schemaVersion);
         }
-        return new GeometryCollection(payload.Clone(), schemaVersion, branches.Count, slots, geometryCount);
+        else if (copy)
+            payload = payload.Clone();
+        return new GeometryCollection(payload, schemaVersion, branches.Count, slots, geometryCount);
     }
 
     internal static JsonElement Snapshot<T>(IEnumerable<T> branches, int schemaVersion) => JsonSerializer.SerializeToElement(
@@ -168,20 +176,24 @@ public sealed class GeometryCollection
             throw Invalid("Expected a Boolean closure flag.", "closed");
         var closed = closedValue.GetBoolean();
         var points = Elements(item.GetProperty("points"), "points", closed ? 3 : 2);
-        var first = Coordinates(points.First(), "points[0]");
+        points.MoveNext();
+        var first = Coordinates(points.Current, "points", 0);
+        var second = first;
         var previous = first;
-        HashSet<(double X, double Y, double Z)>? distinct = closed ? new() { first } : null;
+        var hasThird = false;
         var index = 1;
-        foreach (var value in points.Skip(1))
+        while (points.MoveNext())
         {
-            var current = Coordinates(value, $"points[{index}]");
+            var current = Coordinates(points.Current, "points", index);
             if (previous == current)
-                throw Invalid("A polyline segment has zero length.", $"points[{index}]");
-            distinct?.Add(current);
+                throw Invalid("A polyline segment has zero length.", IndexedField("points", index));
+            if (index == 1)
+                second = current;
+            hasThird |= current != first && current != second;
             previous = current;
             index++;
         }
-        if (closed && (previous == first || distinct!.Count < 3))
+        if (closed && (previous == first || !hasThird))
             throw Invalid("A closed polyline needs three distinct vertices and no repeated closing vertex.", "points");
     }
 
@@ -201,21 +213,29 @@ public sealed class GeometryCollection
 
     private static void CheckMesh(JsonElement item)
     {
-        var points = Elements(item.GetProperty("positions"), "positions", 3)
-            .Select((value, index) => Coordinates(value, $"positions[{index}]")).ToArray();
+        var positions = item.GetProperty("positions");
+        var vertices = Elements(positions, "positions", 3);
+        var points = new (double X, double Y, double Z)[positions.GetArrayLength()];
         var index = 0;
+        foreach (var vertex in vertices)
+        {
+            points[index] = Coordinates(vertex, "positions", index);
+            index++;
+        }
+
+        index = 0;
         foreach (var face in Elements(item.GetProperty("triangles"), "triangles", 1))
         {
-            var field = $"triangles[{index++}]";
-            RequireLength(face, 3, field);
-            var a = Integer(face[0], field);
-            var b = Integer(face[1], field);
-            var c = Integer(face[2], field);
+            RequireLength(face, 3, "triangles", index);
+            var a = Integer(face[0], "triangles", index);
+            var b = Integer(face[1], "triangles", index);
+            var c = Integer(face[2], "triangles", index);
             if (a >= points.Length || b >= points.Length || c >= points.Length)
-                throw CollectionFormatException.At("MESH_INDEX_OUT_OF_RANGE", "A triangle refers to a missing vertex.", field);
+                throw CollectionFormatException.At("MESH_INDEX_OUT_OF_RANGE", "A triangle refers to a missing vertex.", IndexedField("triangles", index));
             var normal = Cross(Subtract(points[b], points[a]), Subtract(points[c], points[a]));
             if (normal == (0, 0, 0) || !double.IsFinite(normal.X) || !double.IsFinite(normal.Y) || !double.IsFinite(normal.Z))
-                throw Invalid("A triangle must have a finite, nonzero area.", field);
+                throw Invalid("A triangle must have a finite, nonzero area.", IndexedField("triangles", index));
+            index++;
         }
     }
 
@@ -225,10 +245,10 @@ public sealed class GeometryCollection
     private static (double X, double Y, double Z) Cross((double X, double Y, double Z) a, (double X, double Y, double Z) b) =>
         (a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X);
 
-    private static (double X, double Y, double Z) Coordinates(JsonElement value, string field)
+    private static (double X, double Y, double Z) Coordinates(JsonElement value, string field, int index = -1)
     {
-        RequireLength(value, 3, field);
-        return (Number(value[0], field), Number(value[1], field), Number(value[2], field));
+        RequireLength(value, 3, field, index);
+        return (Number(value[0], field, index), Number(value[1], field, index), Number(value[2], field, index));
     }
 
     private static void Interval(JsonElement value, string field)
@@ -238,10 +258,10 @@ public sealed class GeometryCollection
             throw Invalid("Expected a strictly increasing interval.", field);
     }
 
-    private static void RequireLength(JsonElement value, int count, string field)
+    private static void RequireLength(JsonElement value, int count, string field, int index = -1)
     {
         if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() != count)
-            throw Invalid($"Expected exactly {count} values.", field);
+            throw Invalid($"Expected exactly {count} values.", IndexedField(field, index));
     }
 
     private static JsonElement.ArrayEnumerator Elements(JsonElement value, string field, int minimum = 0)
@@ -251,18 +271,18 @@ public sealed class GeometryCollection
         return value.EnumerateArray();
     }
 
-    private static int Integer(JsonElement value, string field)
+    private static int Integer(JsonElement value, string field, int index = -1)
     {
-        var number = Number(value, field);
+        var number = Number(value, field, index);
         if (number < 0 || number > int.MaxValue || number != Math.Truncate(number))
-            throw Invalid("Expected a nonnegative 32-bit integer.", field);
+            throw Invalid("Expected a nonnegative 32-bit integer.", IndexedField(field, index));
         return (int)number;
     }
 
-    private static double Number(JsonElement value, string field) =>
+    private static double Number(JsonElement value, string field, int index = -1) =>
         value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) && double.IsFinite(number)
             ? number
-            : throw Invalid("Expected a finite number.", field);
+            : throw Invalid("Expected a finite number.", IndexedField(field, index));
 
     private static string Text(JsonElement value, string field) =>
         value.ValueKind == JsonValueKind.String
@@ -285,6 +305,8 @@ public sealed class GeometryCollection
                 throw Invalid("Missing required property.", name);
         }
     }
+
+    private static string IndexedField(string field, int index) => index < 0 ? field : $"{field}[{index}]";
 
     private static CollectionFormatException Invalid(string message, string? field = null) =>
         CollectionFormatException.At("INVALID_GEOMETRY", message, field);

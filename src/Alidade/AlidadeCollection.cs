@@ -9,12 +9,12 @@ namespace Torquetum.Alidade;
 public sealed class AlidadeCollection : GH_Goo<GeometryCollection?>
 {
     public AlidadeCollection() { }
-    internal AlidadeCollection(GeometryCollection collection) : base(collection) { }
+    internal AlidadeCollection(GeometryCollection? collection) : base(collection) { }
 
     public override bool IsValid => Value != null;
     public override string TypeName => "Alidade Geometry Collection";
     public override string TypeDescription => "A geometry data tree in Torquetum Project coordinates.";
-    public override IGH_Goo Duplicate() => Value is { } collection ? new AlidadeCollection(collection) : new AlidadeCollection();
+    public override IGH_Goo Duplicate() => new AlidadeCollection(Value);
     public override string ToString() => Value?.ToString() ?? "Empty Alidade collection";
 
     public override bool Write(GH_IWriter writer)
@@ -31,8 +31,7 @@ public sealed class AlidadeCollection : GH_Goo<GeometryCollection?>
             return true;
         try
         {
-            using var source = JsonDocument.Parse(reader.GetString("Collection"));
-            Value = GeometryCollection.Parse(source.RootElement);
+            Value = GeometryCollection.FromOwnedPayload(JsonSerializer.Deserialize<JsonElement>(reader.GetString("Collection")));
             return true;
         }
         catch (Exception error) when (error is JsonException or CollectionFormatException)

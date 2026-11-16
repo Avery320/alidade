@@ -99,7 +99,7 @@ internal static class GeometryCollectionConverter
             return null;
         try
         {
-            return GeometryCollection.Parse(GeometryCollection.Snapshot(branches, schemaVersion));
+            return GeometryCollection.FromOwnedPayload(GeometryCollection.Snapshot(branches, schemaVersion));
         }
         catch (CollectionFormatException error)
         {
@@ -257,7 +257,7 @@ internal static class GeometryCollectionConverter
             "point" => new GH_Point(Position("position")),
             "line" => DecodeLine(new Line(Position("start"), Position("end")), item),
             "polyline" => DecodePolyline(item, scale),
-            "plane" => PlaneGoo(item, scale),
+            "plane" => new GH_Plane(ReadPlane(item, scale)),
             "box" => new GH_Box(new Box(ReadPlane(item.GetProperty("plane"), scale), Section("x"), Section("y"), Section("z"))),
             "triangle-mesh" => DecodeMesh(item, scale),
             "brep-step" => new GH_Brep(RhinoStepGeometry.Decode(item.GetProperty("shapeType").GetString()!,
@@ -316,8 +316,6 @@ internal static class GeometryCollectionConverter
         var (shapeType, text) = RhinoStepGeometry.Encode(geometry, scale, tolerance);
         return Fields("brep-step", ("shapeType", shapeType), ("step", text));
     }
-
-    private static GH_Plane PlaneGoo(JsonElement item, double scale) => new(ReadPlane(item, scale));
 
     private static Plane ReadPlane(JsonElement item, double scale)
     {

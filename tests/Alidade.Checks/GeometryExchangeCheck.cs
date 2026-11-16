@@ -122,7 +122,7 @@ internal static class GeometryExchangeCheck
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
                 receipt = await Invoke("CheckReceiptAsync", session, documentId, Member(write, "Id"), token);
             }
-            Check(Member(receipt, "State") as string == "committed", "write receipt is committed");
+            Check(Member(receipt, "State") as string == "committed", $"write receipt is committed ({Member(receipt, "Message")})");
             return receipt;
         }
     }
