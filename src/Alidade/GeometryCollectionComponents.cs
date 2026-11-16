@@ -33,6 +33,7 @@ public sealed class BuildGeometryCollection : GH_Component
             "Alidade", "Convert") { }
 
     public override Guid ComponentGuid => new("61799db7-0931-4460-b71c-a22097849a68");
+    protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("BuildCollection");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
@@ -89,6 +90,7 @@ public sealed class UnpackGeometryCollection : GH_Component
             "Alidade", "Convert") { }
 
     public override Guid ComponentGuid => new("41b84810-df87-4080-b29b-b731a9d53196");
+    protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("UnpackCollection");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {

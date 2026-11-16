@@ -37,6 +37,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         : base("Send Geometry", "Send Geometry", "Send a Geometry Collection to an Asterism input on demand.", "Exchange") { }
 
     public override Guid ComponentGuid => new("9d700ca8-b14a-4b59-b587-4d86490a705f");
+    protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("SendGeometry");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {

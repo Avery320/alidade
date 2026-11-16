@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Icons/*.png" LogicalName="$(RootNamespace).Icons.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Rhino 8.6 runs on .NET 7 and publishes its SDK references under net48. -->
     <!-- Grasshopper 1 menus use WinForms. Rhino 8 supplies the Mac runtime shim. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3"

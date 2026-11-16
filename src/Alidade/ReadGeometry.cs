@@ -16,6 +16,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
         : base("Read Geometry", "Read Geometry", "Read a Geometry Collection from an Asterism output.", "Exchange") { }
 
     public override Guid ComponentGuid => new("aecf9292-0da8-4783-9ca6-2aeedf326acc");
+    protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("ReadGeometry");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {

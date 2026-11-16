@@ -18,6 +18,7 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
         : base("Connect to Torquetum", "Connect", "Pair with a running Torquetum project.", "Session") { }
 
     public override Guid ComponentGuid => new("704efa3e-ae66-48c5-89fc-01ebffe84565");
+    protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("Connect");
 
     protected override void RegisterInputParams(GH_InputParamManager manager) { }
 

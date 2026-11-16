@@ -18,6 +18,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
         : base("Select Asterism Port", "Select Port", "Select an Asterism input or output from a Torquetum project.", "Session") { }
 
     public override Guid ComponentGuid => new("8006ed19-e281-404e-9ca2-acd6992c6223");
+    protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("SelectPort");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
