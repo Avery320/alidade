@@ -7,7 +7,7 @@ namespace Torquetum.Alidade;
 
 public sealed class SendGeometry : AlidadeAsyncComponent
 {
-    private sealed record Inputs(ProjectSession Project, GeometryCollection Collection, GeometryReference? Target, string Name);
+    private sealed record Inputs(ProjectSession Project, GeometryCollection Collection, GeometryPortReference Target);
 
     private sealed class Attempt
     {
@@ -34,7 +34,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     private string _ready = "Connect to Torquetum first.";
 
     public SendGeometry()
-        : base("Send Geometry", "Send Geometry", "Create or replace Station geometry on demand.", "Exchange") { }
+        : base("Send Geometry", "Send Geometry", "Send a Geometry Collection to an Asterism input on demand.", "Exchange") { }
 
     public override Guid ComponentGuid => new("9d700ca8-b14a-4b59-b587-4d86490a705f");
 
@@ -42,16 +42,15 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     {
         manager.AddParameter(new AlidadeProjectParameter());
         manager.AddParameter(new AlidadeCollectionParameter());
-        manager.AddParameter(new AlidadeGeometryRefParameter(), "Target", "T", "Geometry to replace.", GH_ParamAccess.item);
-        manager.AddTextParameter("Name", "N", "Station name for Create.", GH_ParamAccess.item);
-        for (var i = 0; i < 4; i++)
+        manager.AddParameter(new AlidadePortReferenceParameter(), "Target", "T", "Asterism input to update.", GH_ParamAccess.item);
+        for (var i = 0; i < 3; i++)
             manager[i].Optional = true;
     }
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
         manager.AddParameter(new AlidadeWriteReceiptParameter());
-        manager.AddParameter(new AlidadeGeometryRefParameter());
+        manager.AddParameter(new AlidadePortReferenceParameter());
         manager.AddTextParameter("Status", "S", "State of the last write and current inputs.", GH_ParamAccess.item);
     }
 
@@ -84,12 +83,8 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             if (attempt.Receipt is { } receipt)
             {
                 data.SetData(0, new AlidadeWriteReceipt(receipt));
-                if (receipt is { State: "committed", EntityId: { } id, ETag: { } tag })
-                {
-                    var name = attempt.Inputs.Target?.Name ?? attempt.Inputs.Name;
-                    data.SetData(1, new AlidadeGeometryRef(new GeometryReference(receipt.ProjectId, receipt.InstanceId,
-                        id, tag, name, attempt.Inputs.Project.Status.CanWrite)));
-                }
+                if (receipt is { State: "committed", ETag: { } tag })
+                    data.SetData(1, new AlidadePortReference(attempt.Inputs.Target with { ETag = tag }));
             }
         }
         else
@@ -115,27 +110,15 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             return null;
         }
 
-        if (Params.Input[2].SourceCount != 0 || Params.Input[2].VolatileDataCount != 0)
+        AlidadePortReference? target = null;
+        if (Params.Input[2].VolatileDataCount != 1 || !data.GetData(2, ref target)
+            || target?.Value is not { Direction: "input" } reference || !reference.Matches(project))
         {
-            AlidadeGeometryRef? target = null;
-            if (Params.Input[2].VolatileDataCount != 1 || !data.GetData(2, ref target)
-                || target?.Value is not { CanReplace: true } reference || !reference.Matches(project))
-            {
-                _ready = "Select a replaceable geometry in the connected project.";
-                return null;
-            }
-            _ready = Unavailable(project, collection) ?? "Ready to replace geometry.";
-            return new Inputs(project, collection, reference, "");
-        }
-
-        string? name = null;
-        if (Params.Input[3].VolatileDataCount != 1 || !data.GetData(3, ref name) || string.IsNullOrWhiteSpace(name))
-        {
-            _ready = "Enter a name for Create.";
+            _ready = "Select an Asterism input in the connected project.";
             return null;
         }
-        _ready = Unavailable(project, collection) ?? "Ready to create geometry.";
-        return new Inputs(project, collection, null, name.Trim());
+        _ready = Unavailable(project, collection) ?? $"Ready to send to {reference.Name}.";
+        return new Inputs(project, collection, reference);
     }
 
     private static string? Unavailable(ProjectSession project, GeometryCollection collection) =>
@@ -148,30 +131,32 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         base.AppendAdditionalComponentMenuItems(menu);
         var document = OnPingDocument();
         var enabled = !IsPending && CanUse(document) && document != null && _project?.IsValidFor(document.RuntimeID) == true;
-        Menu_AppendItem(menu, "Create", (_, _) => Begin(replace: false), enabled && CanStart(replace: false));
-        Menu_AppendItem(menu, "Replace", (_, _) => Begin(replace: true), enabled && CanStart(replace: true));
+        Menu_AppendItem(menu, "Send", (_, _) => Begin(), enabled && CanStart());
         Menu_AppendItem(menu, "Check result", (_, _) => Continue(check: true), enabled && CanContinue(check: true));
         Menu_AppendItem(menu, "Retry same request", (_, _) => Continue(check: false), enabled && CanContinue(check: false));
     }
 
-    private bool CanStart(bool replace) => _inputs is { } input && Unavailable(input.Project, input.Collection) == null
-        && (input.Target != null) == replace && (_attempt == null || _attempt.CanStartAnother);
+    private bool CanStart() => _inputs is { } input && Unavailable(input.Project, input.Collection) == null
+        && (_attempt == null || _attempt.CanStartAnother);
 
     private bool CanContinue(bool check) =>
         _attempt is { } attempt && ReferenceEquals(_project, attempt.Inputs.Project)
         && (attempt.RetryAfter == null || attempt.RetryAfter <= DateTimeOffset.UtcNow)
         && (check || attempt.Request != null);
 
-    private void Begin(bool replace)
+    private void Begin()
     {
         var document = OnPingDocument();
-        if (document == null || !CanUse(document) || IsPending || !CanStart(replace) || _inputs is not { } input
+        if (document == null || !CanUse(document) || IsPending || !CanStart() || _inputs is not { } input
             || !input.Project.IsValidFor(document.RuntimeID))
             return;
 
         try
         {
-            _attempt = new Attempt(input, AlidadeClient.PrepareWrite(input.Collection, input.Name, input.Target));
+            var target = input.Target;
+            if (_attempt is { Receipt: { State: "committed", ETag: { } tag } } previous && previous.Inputs.Target == target)
+                target = target with { ETag = tag };
+            _attempt = new Attempt(input, AlidadeClient.PrepareWrite(input.Collection, target));
             _problem = null;
             Execute(document, _attempt, check: false);
         }
@@ -199,7 +184,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         attempt.Error = null;
         _problem = null;
         StartRequest(document, project, cancellation => check
-                ? AlidadeClient.CheckReceiptAsync(project, document.RuntimeID, attempt.Id, cancellation)
+                ? AlidadeClient.CheckReceiptAsync(project, document.RuntimeID, attempt.Id, attempt.Inputs.Target.PortId, cancellation)
                 : AlidadeClient.WriteGeometryAsync(project, document.RuntimeID, request!, cancellation),
             receipt =>
             {

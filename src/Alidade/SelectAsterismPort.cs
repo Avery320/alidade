@@ -6,30 +6,30 @@ using Grasshopper.Kernel;
 
 namespace Torquetum.Alidade;
 
-public sealed class SelectProjectGeometry : AlidadeAsyncComponent
+public sealed class SelectAsterismPort : AlidadeAsyncComponent
 {
     private ProjectSession? _project;
-    private IReadOnlyList<GeometryListing>? _items;
+    private IReadOnlyList<GeometryPort>? _items;
     private string? _selection;
     private Guid _selectedInstance;
     private string? _error;
 
-    public SelectProjectGeometry()
-        : base("Select Project Geometry", "Select Geometry", "Select Station geometry from a Torquetum project.", "Session") { }
+    public SelectAsterismPort()
+        : base("Select Asterism Port", "Select Port", "Select an Asterism input or output from a Torquetum project.", "Session") { }
 
     public override Guid ComponentGuid => new("8006ed19-e281-404e-9ca2-acd6992c6223");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
         manager.AddParameter(new AlidadeProjectParameter());
-        manager.AddTextParameter("Entity ID", "ID", "Optional Station entity ID. When omitted, select an entity from the component menu.",
+        manager.AddTextParameter("Port ID", "ID", "Optional Asterism port ID. When omitted, select a port from the component menu.",
             GH_ParamAccess.item);
         manager[0].Optional = manager[1].Optional = true;
     }
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
-        manager.AddParameter(new AlidadeGeometryRefParameter());
+        manager.AddParameter(new AlidadePortReferenceParameter());
         manager.AddTextParameter("Status", "S", "Selection and readiness.", GH_ParamAccess.item);
     }
 
@@ -48,27 +48,26 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
 
         string status;
         var byId = Params.Input[1].VolatileDataCount != 0 || Params.Input[1].SourceCount != 0;
-        string? entityId = null;
+        string? portId = null;
         if (byId && Params.Input[1].VolatileDataCount == 1)
-            data.GetData(1, ref entityId);
+            data.GetData(1, ref portId);
         else if (!byId && project != null && _selectedInstance == project.Status.InstanceId)
-            entityId = _selection;
+            portId = _selection;
 
         if (project == null) status = "Connect to Torquetum first.";
-        else if (IsPending) status = "Reading project geometry…";
+        else if (IsPending) status = "Reading Asterism ports…";
         else if (_error != null) status = _error;
-        else if (_items == null) status = "Use Refresh list to read geometries.";
-        else if (byId && string.IsNullOrWhiteSpace(entityId)) status = "Provide one Station entity ID.";
-        else if (entityId == null) status = _items.Count == 0 ? "No Station geometry." : "Choose geometry from the component menu.";
+        else if (_items == null) status = "Use Refresh list to read Asterism ports.";
+        else if (byId && string.IsNullOrWhiteSpace(portId)) status = "Provide one Asterism port ID.";
+        else if (portId == null) status = _items.Count == 0 ? "No Asterism exchange ports." : "Choose a port from the component menu.";
         else
         {
-            var item = _items.FirstOrDefault(candidate => candidate.EntityId == entityId);
-            if (item == null) status = AlidadeClient.ErrorMessage("ENTITY_NOT_FOUND");
-            else if (!item.CanRead) status = AlidadeClient.ErrorMessage(item.Reason ?? "UNSUPPORTED_GEOMETRY");
+            var item = _items.FirstOrDefault(candidate => candidate.Id == portId);
+            if (item == null) status = AlidadeClient.ErrorMessage("PORT_NOT_FOUND");
             else
             {
-                data.SetData(0, new AlidadeGeometryRef(item.Reference(project.Status)));
-                status = item.CanReplace ? item.Name : item.Name + " (read only)";
+                data.SetData(0, new AlidadePortReference(item.Reference(project.Status)));
+                status = $"{item.Name} ({item.Direction})";
             }
         }
         Message = status;
@@ -86,14 +85,13 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
             || Params.Input[1].SourceCount != 0 || Params.Input[1].VolatileDataCount != 0)
             return;
 
-        var list = new ToolStripMenuItem("Project geometry");
+        var list = new ToolStripMenuItem("Asterism ports");
         menu.Items.Add(list);
         foreach (var item in _items)
         {
-            var path = string.Join(" / ", item.ParentPath.Append(item.Name));
-            var suffix = item.EntityId.Length > 8 ? item.EntityId[^8..] : item.EntityId;
-            var chosen = _selectedInstance == project.Status.InstanceId && _selection == item.EntityId;
-            Menu_AppendItem(list.DropDown, $"{path} [{suffix}]", (_, _) => Select(project, item.EntityId), item.CanRead, chosen);
+            var suffix = item.Id.Length > 8 ? item.Id[^8..] : item.Id;
+            var chosen = _selectedInstance == project.Status.InstanceId && _selection == item.Id;
+            Menu_AppendItem(list.DropDown, $"{item.Name} ({item.Direction}) [{suffix}]", (_, _) => Select(project, item.Id), true, chosen);
         }
     }
 
@@ -115,7 +113,7 @@ public sealed class SelectProjectGeometry : AlidadeAsyncComponent
             return;
         _error = null;
         _items = null;
-        StartRequest(document, project, cancellation => AlidadeClient.ListGeometryAsync(project, document.RuntimeID, cancellation),
+        StartRequest(document, project, cancellation => AlidadeClient.ListPortsAsync(project, document.RuntimeID, cancellation),
             items => _items = items, error => _error = error.Message);
     }
 

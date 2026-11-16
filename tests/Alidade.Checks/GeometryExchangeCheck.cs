@@ -19,29 +19,41 @@ internal static class GeometryExchangeCheck
         var session = await Invoke("PairAsync", invite, documentId, token);
         try
         {
-            await Invoke("ListGeometryAsync", session, documentId + 1, token);
+            await Invoke("ListPortsAsync", session, documentId + 1, token);
             throw new InvalidOperationException("Project session accepted another Grasshopper document.");
         }
         catch (Exception error) when (MemberOrDefault(error, "PairingRequired") is true)
         {
         }
 
-        var create = Call("PrepareWrite", collection, "Alidade managed check " + Guid.NewGuid().ToString("N")[..8], null);
-        var committed = await Committed(create);
-        var id = (string)Member(committed, "EntityId");
-        var tag = (string)Member(committed, "ETag");
-        var replay = await Committed(create);
-        Check(Member(replay, "RequestId").Equals(Member(committed, "RequestId"))
-            && Member(replay, "EntityId").Equals(id) && Member(replay, "ETag").Equals(tag), "same write replay");
-
-        var items = ((IEnumerable)await Invoke("ListGeometryAsync", session, documentId, token)).Cast<object>();
-        var item = items.Single(value => Member(value, "EntityId").Equals(id));
-        Check(Member(item, "CanRead") is true && Member(item, "CanReplace") is true, "select the committed managed geometry");
         var status = Member(session, "Status");
-        var reference = item.GetType().GetMethod("Reference", BindingFlags.NonPublic | BindingFlags.Instance)!
-            .Invoke(item, new[] { status })!;
-        var read = await Invoke("ReadGeometryAsync", session, documentId, reference, token);
-        var original = (JsonElement)Member(Member(read, "Collection"), "Payload");
+        var ports = ((IEnumerable)await Invoke("ListPortsAsync", session, documentId, token)).Cast<object>().ToArray();
+        var input = ports.Single(port => Member(port, "Direction").Equals("input"));
+        var output = ports.Single(port => Member(port, "Direction").Equals("output"));
+        var id = Member(input, "Id");
+        var tag = Member(input, "ETag");
+        Check(MemberOrDefault(output, "ETag") == null, "only inputs have an ETag");
+        var inputRef = Reference(input);
+        var outputRef = Reference(output);
+
+        try
+        {
+            await Invoke("ReadGeometryAsync", session, documentId, outputRef, token);
+            throw new InvalidOperationException("A fresh graph reported a completed output before its first input.");
+        }
+        catch (Exception error) when (MemberOrDefault(error, "Code") as string == "OUTPUT_NOT_READY")
+        {
+        }
+
+        var send = Call("PrepareWrite", collection, inputRef);
+        var committed = await Committed(send);
+        Check(Member(committed, "PortId").Equals(id) && !Member(committed, "ETag").Equals(tag),
+            "send writes to the selected input and advances its revision");
+        var replay = await Committed(send);
+        Check(Member(replay, "RequestId").Equals(Member(committed, "RequestId"))
+            && Member(replay, "PortId").Equals(id) && Member(replay, "ETag").Equals(Member(committed, "ETag")), "same write replay");
+
+        var original = await ReadOutput(outputRef);
         Check(original.GetProperty("branches")[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null
             && original.GetProperty("branches")[1].GetProperty("items").GetArrayLength() == 0,
             "read preserves null and empty branch");
@@ -50,13 +62,14 @@ internal static class GeometryExchangeCheck
         edited["branches"]![0]!["items"]![0]!["position"]![0] = 4;
         using var json = JsonDocument.Parse(edited.ToJsonString());
         var parsed = collection.GetType().GetMethod("Parse")!.Invoke(null, new object[] { json.RootElement })!;
-        var replace = Call("PrepareWrite", parsed, "", Member(read, "Reference"));
-        var replaced = await Committed(replace);
-        Check(Member(replaced, "EntityId").Equals(id) && !Member(replaced, "ETag").Equals(tag), "replace keeps identity and advances version");
+        var update = Call("PrepareWrite", parsed, await CurrentInput());
+        var updated = await Committed(update);
+        Check(Member(updated, "PortId").Equals(id) && !Member(updated, "ETag").Equals(Member(committed, "ETag")),
+            "update keeps input identity and advances its revision");
 
         try
         {
-            var stale = Call("PrepareWrite", collection, "", reference);
+            var stale = Call("PrepareWrite", collection, inputRef);
             await Invoke("WriteGeometryAsync", session, documentId, stale, token);
             throw new InvalidOperationException("The previous revision was accepted.");
         }
@@ -64,23 +77,16 @@ internal static class GeometryExchangeCheck
         {
         }
 
-        var final = await Invoke("ReadGeometryAsync", session, documentId, reference, token);
-        var finalPayload = (JsonElement)Member(Member(final, "Collection"), "Payload");
+        var finalPayload = await ReadOutput(outputRef);
         Check(finalPayload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 4,
-            "read obtains the replacement even using an older reference");
-        Console.WriteLine("PASS live C# pair, project scoping, create, exact replay, select, read, replace and stale protection.");
+            "the same output port returns the graph result after input changes");
+        Console.WriteLine("PASS live C# pair, document scoping, Asterism port list, first send, exact replay, output read, update and stale protection.");
 
-        var cadWrite = Call("PrepareWrite", cadCollection, "Alidade STEP check " + Guid.NewGuid().ToString("N")[..8], null);
+        var cadWrite = Call("PrepareWrite", cadCollection, await CurrentInput());
         if (Member(status, "SupportsStep") is true)
         {
-            var cadReceipt = await Committed(cadWrite);
-            var cadId = Member(cadReceipt, "EntityId");
-            var cadItems = ((IEnumerable)await Invoke("ListGeometryAsync", session, documentId, token)).Cast<object>();
-            var cadItem = cadItems.Single(value => Member(value, "EntityId").Equals(cadId));
-            var cadReference = cadItem.GetType().GetMethod("Reference", BindingFlags.NonPublic | BindingFlags.Instance)!
-                .Invoke(cadItem, new[] { status })!;
-            var cadRead = await Invoke("ReadGeometryAsync", session, documentId, cadReference, token);
-            var cadPayload = (JsonElement)Member(Member(cadRead, "Collection"), "Payload");
+            await Committed(cadWrite);
+            var cadPayload = await ReadOutput(outputRef);
             var cadBranches = cadPayload.GetProperty("branches");
             Check(cadPayload.GetProperty("schemaVersion").GetInt32() == 2
                 && cadBranches[0].GetProperty("items")[0].GetProperty("shapeType").GetString() == "solid"
@@ -102,6 +108,30 @@ internal static class GeometryExchangeCheck
             }
         }
 
+        object Reference(object port) => port.GetType().GetMethod("Reference", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(port, new[] { status })!;
+
+        async Task<object> CurrentInput()
+        {
+            var listing = ((IEnumerable)await Invoke("ListPortsAsync", session, documentId, token)).Cast<object>();
+            return Reference(listing.Single(port => Member(port, "Id").Equals(id)));
+        }
+
+        async Task<JsonElement> ReadOutput(object reference)
+        {
+            while (true)
+            {
+                try
+                {
+                    var result = await Invoke("ReadGeometryAsync", session, documentId, reference, token);
+                    return (JsonElement)Member(result, "Payload");
+                }
+                catch (Exception error) when (MemberOrDefault(error, "Code") as string == "OUTPUT_NOT_READY")
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), token);
+                }
+            }
+        }
 
         object Call(string method, params object?[] args) =>
             client.GetMethod(method, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!
@@ -120,7 +150,7 @@ internal static class GeometryExchangeCheck
             while (Member(receipt, "State") as string == "pending")
             {
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
-                receipt = await Invoke("CheckReceiptAsync", session, documentId, Member(write, "Id"), token);
+                receipt = await Invoke("CheckReceiptAsync", session, documentId, Member(write, "Id"), id, token);
             }
             Check(Member(receipt, "State") as string == "committed", $"write receipt is committed ({Member(receipt, "Message")})");
             return receipt;
