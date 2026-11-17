@@ -19,9 +19,7 @@ public abstract class AlidadeLiveValue<T> : GH_Goo<T?> where T : class
 
 public sealed record GeometryPortReference(string ProjectId, Guid InstanceId, string PortId, string Name, string Direction, string? ETag)
 {
-    internal string DisplayName => Display(Name, PortId);
-
-    internal static string Display(string name, string id) => $"{name} [{(id.Length > 8 ? id[^8..] : id)}]";
+    internal string DisplayName => $"{Name} [{(PortId.Length > 8 ? PortId[^8..] : PortId)}]";
 
     internal bool Matches(ProjectSession session, string direction) => Direction == direction
         && InstanceId != Guid.Empty && session.Status.Matches(ProjectId, InstanceId);
@@ -55,7 +53,7 @@ public sealed class AlidadePortReference : AlidadeLiveValue<GeometryPortReferenc
 public sealed class AlidadePortReferenceParameter : GH_Param<AlidadePortReference>
 {
     public AlidadePortReferenceParameter()
-        : base("Port Ref", "Port", "An Asterism exchange port in the connected Project.", "Alidade", "Exchange", GH_ParamAccess.item) { }
+        : base("Port Reference", "Port Reference", "An Asterism exchange port in the connected Project.", "Alidade", "Exchange", GH_ParamAccess.item) { }
 
     public override Guid ComponentGuid => new("c9074cbf-d3cd-4125-a9b8-2fdcc1095be9");
     public override GH_Exposure Exposure => GH_Exposure.hidden;
@@ -76,7 +74,7 @@ public sealed class AlidadeWriteReceipt : AlidadeLiveValue<GeometryReceipt>
 public sealed class AlidadeWriteReceiptParameter : GH_Param<AlidadeWriteReceipt>
 {
     public AlidadeWriteReceiptParameter()
-        : base("Receipt", "R", "Status of the last Alidade geometry write.", "Alidade", "Exchange", GH_ParamAccess.item) { }
+        : base("Write Receipt", "Write Receipt", "Status of the last Alidade geometry write.", "Alidade", "Exchange", GH_ParamAccess.item) { }
 
     public override Guid ComponentGuid => new("30636267-9981-4b13-99d5-2966428cc4d1");
     public override GH_Exposure Exposure => GH_Exposure.hidden;

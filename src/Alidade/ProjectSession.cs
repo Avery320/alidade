@@ -66,7 +66,7 @@ public sealed class AlidadeProject : AlidadeLiveValue<ProjectSession>
 public sealed class AlidadeProjectParameter : GH_Param<AlidadeProject>
 {
     public AlidadeProjectParameter()
-        : base("Project", "P", "A live Torquetum project connection.", "Alidade", "Session", GH_ParamAccess.item) { }
+        : base("Project", "Project", "A live Torquetum project connection.", "Alidade", "Session", GH_ParamAccess.item) { }
 
     public override Guid ComponentGuid => new("6300cb1e-3e9b-427e-b3d1-c39fed8ee509");
     public override GH_Exposure Exposure => GH_Exposure.hidden;

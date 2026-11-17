@@ -22,12 +22,10 @@ internal static class GeometryExchangeCheck
         var refreshed = await AlidadeClient.ReadProjectAsync(session, documentId, token);
         Check(refreshed.GeometryNames == status.GeometryNames, "project refresh preserves the negotiated names capability");
         var ports = await AlidadeClient.ListPortsAsync(session, documentId, token);
-        var input = ports.Single(port => port.Direction == "input");
-        var output = ports.Single(port => port.Direction == "output");
-        var id = input.Id;
-        Check(input.ETag != null && output.ETag == null, "only inputs have an ETag");
-        var inputRef = input.Reference(status);
-        var outputRef = output.Reference(status);
+        var inputRef = ports.Single(port => port.Direction == "input");
+        var outputRef = ports.Single(port => port.Direction == "output");
+        var id = inputRef.PortId;
+        Check(inputRef.ETag != null && outputRef.ETag == null, "only inputs have an ETag");
 
         await ExpectError("OUTPUT_NOT_READY", () => AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token));
 
@@ -40,7 +38,7 @@ internal static class GeometryExchangeCheck
 
         var send = AlidadeClient.PrepareWrite(status.GeometryNames ? namedCollection : collection, inputRef);
         var committed = await Committed(send);
-        Check(committed.PortId == id && committed.ETag != null && committed.ETag != input.ETag,
+        Check(committed.PortId == id && committed.ETag != null && committed.ETag != inputRef.ETag,
             "send writes to the selected input and advances its revision");
         var replay = await Committed(send);
         Check(replay.RequestId == committed.RequestId && replay.PortId == id && replay.ETag == committed.ETag, "same write replay");
@@ -90,23 +88,11 @@ internal static class GeometryExchangeCheck
         async Task<GeometryPortReference> CurrentInput()
         {
             var listing = await AlidadeClient.ListPortsAsync(session, documentId, token);
-            return listing.Single(port => port.Id == id).Reference(status);
+            return listing.Single(port => port.PortId == id);
         }
 
-        async Task<JsonElement> ReadOutput(GeometryReceipt receipt)
-        {
-            while (true)
-            {
-                try
-                {
-                    return (await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, receipt)).Payload;
-                }
-                catch (AlidadeConnectionException error) when (error.Code == "OUTPUT_NOT_READY")
-                {
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), token);
-                }
-            }
-        }
+        async Task<JsonElement> ReadOutput(GeometryReceipt receipt) =>
+            (await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, receipt)).Payload;
 
         async Task<GeometryReceipt> Committed(GeometryWriteRequest write)
         {

@@ -28,6 +28,8 @@ internal static class AlidadeChecks
         var sortedPaths = unordered.Payload.GetProperty("branches").EnumerateArray().Select(branch => branch.GetProperty("path").GetRawText());
         Check(sortedPaths.SequenceEqual(new[] { "[2]", "[2,9]", "[2,10]" }), "numeric branch ordering");
         Reject(fixture.Replace("[0, 4]", "[0]"), "Duplicate branch path");
+        Reject("""{"schemaVersion":1,"units":"m","space":"project","branches":[{"path":[2],"items":[]},{"path":[1],"items":[]},{"path":[2],"items":[]}]}""",
+            "Duplicate branch path");
         Reject(fixture.Replace("[1, 2, 3]", "[1e400, 2, 3]"), "finite number");
         Reject(fixture.Replace("[0, 5]", "[5, 0]"), "strictly increasing");
         Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1, 3]]"), "MESH_INDEX_OUT_OF_RANGE");

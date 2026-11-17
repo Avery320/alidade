@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -9,22 +10,14 @@ using System.Threading.Tasks;
 
 namespace Torquetum.Alidade;
 
-internal sealed record GeometryPort(string Id, string Name, string Direction, string? ETag)
-{
-    internal GeometryPortReference Reference(ProjectStatus status) =>
-        new(status.ProjectId, status.InstanceId, Id, Name, Direction, ETag);
-}
-
 internal sealed record GeometryWriteRequest(Guid Id, GeometryPortReference Target, int SchemaVersion, bool HasNames, ReadOnlyMemory<byte> Payload);
 
 internal static partial class AlidadeClient
 {
     private const string AsterismRoute = "/v1/asterism";
 
-    private sealed class PortDirectory
-    {
-        public required GeometryPort[] Items { get; init; }
-    }
+    private sealed record PortDescription(string Id, string Name, string Direction, string? ETag);
+    private sealed record PortDirectory(PortDescription[] Items);
 
     private sealed class ReceiptResponse
     {
@@ -41,7 +34,7 @@ internal static partial class AlidadeClient
         public ErrorDetails? Error { get; init; }
     }
 
-    internal static async Task<IReadOnlyList<GeometryPort>> ListPortsAsync(
+    internal static async Task<IReadOnlyList<GeometryPortReference>> ListPortsAsync(
         ProjectSession project, ulong documentId, CancellationToken cancellation)
     {
         using var request = project.Request(documentId, HttpMethod.Get, $"{AsterismRoute}/ports");
@@ -49,14 +42,18 @@ internal static partial class AlidadeClient
         if (listing.Items == null)
             throw new JsonException();
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var item in listing.Items)
+        var status = project.Status;
+        var ports = new GeometryPortReference[listing.Items.Length];
+        for (var index = 0; index < ports.Length; index++)
         {
+            var item = listing.Items[index];
             if (item == null || !ValidPortId(item.Id) || !ids.Add(item.Id) || string.IsNullOrWhiteSpace(item.Name)
                 || item.Direction is not ("input" or "output")
                 || (item.Direction == "input" ? !StrongTag(item.ETag) : item.ETag != null))
                 throw new JsonException();
+            ports[index] = new(status.ProjectId, status.InstanceId, item.Id, item.Name, item.Direction, item.ETag);
         }
-        return listing.Items;
+        return ports;
     }
 
     internal static async Task<GeometryCollection> ReadGeometryAsync(ProjectSession project, ulong documentId,
@@ -64,13 +61,30 @@ internal static partial class AlidadeClient
     {
         if (!target.Matches(project, "output"))
             throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
-        using var request = project.Request(documentId, HttpMethod.Get, PortRoute("outputs", target.PortId));
-        if (receipt != null)
+        if (receipt != null && (!receipt.Matches(project) || receipt.State != "committed" || !StrongTag(receipt.ETag)))
+            throw new AlidadeConnectionException("Connect a committed receipt from this project.");
+
+        var started = Stopwatch.GetTimestamp();
+        while (true)
         {
-            if (!receipt.Matches(project) || receipt.State != "committed" || !StrongTag(receipt.ETag))
-                throw new AlidadeConnectionException("Connect a committed receipt from this project.");
-            request.Headers.Add("X-Alidade-Request-Id", receipt.RequestId.ToString("D"));
+            try
+            {
+                return await ReadOutputAsync(project, documentId, target.PortId, receipt, cancellation).ConfigureAwait(false);
+            }
+            catch (AlidadeConnectionException error) when (receipt != null && error.Code == "OUTPUT_NOT_READY"
+                && Stopwatch.GetElapsedTime(started).TotalSeconds < 15)
+            {
+                await Task.Delay(500, cancellation).ConfigureAwait(false);
+            }
         }
+    }
+
+    private static async Task<GeometryCollection> ReadOutputAsync(ProjectSession project, ulong documentId,
+        string portId, GeometryReceipt? receipt, CancellationToken cancellation)
+    {
+        using var request = project.Request(documentId, HttpMethod.Get, PortRoute("outputs", portId));
+        if (receipt != null)
+            request.Headers.Add("X-Alidade-Request-Id", receipt.RequestId.ToString("D"));
         using var response = await SendForStatusAsync(request, HttpStatusCode.OK, cancellation, timeoutSeconds: 60)
             .ConfigureAwait(false);
         if (receipt != null && response.Headers.ETag?.ToString() != receipt.ETag)
@@ -141,7 +155,7 @@ internal static partial class AlidadeClient
             }
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested) { return pending; }
-        catch (HttpRequestException) { return pending; }
+        catch (Exception error) when (error is HttpRequestException or JsonException) { return pending; }
         catch (AlidadeConnectionException error) when (!error.PairingRequired) { return pending; }
     }
 

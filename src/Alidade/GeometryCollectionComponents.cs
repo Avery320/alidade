@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using GH_IO.Serialization;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
@@ -12,16 +11,6 @@ internal static class CollectionOutputs
 {
     internal const string GeometryIdsName = "Geometry IDs";
     internal const string GeometryNamesName = "Geometry Names";
-
-    internal static bool ReadGeometryIds(bool loaded, IGH_Param parameter, string description)
-    {
-        if (loaded && parameter.Name == "Item Keys")
-        {
-            parameter.Name = GeometryIdsName;
-            parameter.Description = description;
-        }
-        return loaded;
-    }
 
     internal static void WriteDiagnostics(GH_Component component, IGH_DataAccess data, int index,
         List<CollectionDiagnostic> diagnostics)
@@ -40,25 +29,26 @@ internal static class CollectionOutputs
     }
 }
 
-public sealed class BuildGeometryCollection : GH_Component
+public sealed class BuildGeometryCollection : AlidadeComponent
 {
     private const string GeometryIdsDescription =
         "Stable, unique IDs at the same paths and slots as Geometry. Reuse an ID when updating the same item.";
 
     public BuildGeometryCollection()
         : base("Build Geometry Collection", "Build Collection", "Convert Rhino geometry and its tree to an Alidade collection.",
-            "Alidade", "Convert") { }
+            "Convert") { }
 
     public override Guid ComponentGuid => new("61799db7-0931-4460-b71c-a22097849a68");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("BuildCollection");
+    protected override int OriginalInputCount => 3;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
-        manager.AddGenericParameter("Geometry", "G", "Rhino geometry data tree.", GH_ParamAccess.tree);
-        manager.AddTextParameter(CollectionOutputs.GeometryIdsName, "K", GeometryIdsDescription, GH_ParamAccess.tree);
-        manager.AddTextParameter("Source units", "U", "Rhino unit name or mm, cm, m, in or ft. Uses the Rhino document when omitted.",
+        manager.AddGenericParameter("Geometry", "Geometry", "Rhino geometry data tree.", GH_ParamAccess.tree);
+        manager.AddTextParameter(CollectionOutputs.GeometryIdsName, CollectionOutputs.GeometryIdsName, GeometryIdsDescription, GH_ParamAccess.tree);
+        manager.AddTextParameter("Source Units", "Source Units", "Rhino unit name or mm, cm, m, in or ft. Uses the Rhino document when omitted.",
             GH_ParamAccess.item);
-        manager.AddTextParameter(CollectionOutputs.GeometryNamesName, "N",
+        manager.AddTextParameter(CollectionOutputs.GeometryNamesName, CollectionOutputs.GeometryNamesName,
             "Display names at the same paths and slots as Geometry. Omitted names default to the Geometry ID in Torquetum.", GH_ParamAccess.tree);
         for (var i = 0; i < 4; i++)
             manager[i].Optional = true;
@@ -67,13 +57,7 @@ public sealed class BuildGeometryCollection : GH_Component
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
         manager.AddParameter(new AlidadeCollectionParameter());
-        manager.AddTextParameter("Diagnostics", "D", "Conversion messages at the original paths and item indices.", GH_ParamAccess.tree);
-    }
-
-    public override bool Read(GH_IReader reader)
-    {
-        ComponentArchive.RestoreAppendedParameter(reader, Params.Input[3], 3, input: true);
-        return CollectionOutputs.ReadGeometryIds(base.Read(reader), Params.Input[1], GeometryIdsDescription);
+        manager.AddTextParameter("Diagnostics", "Diagnostics", "Conversion messages at the original paths and item indices.", GH_ParamAccess.tree);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -109,37 +93,33 @@ public sealed class BuildGeometryCollection : GH_Component
     }
 }
 
-public sealed class UnpackGeometryCollection : GH_Component
+public sealed class UnpackGeometryCollection : AlidadeComponent
 {
     private const string GeometryIdsDescription = "Persistent IDs aligned with the returned Geometry tree.";
 
     public UnpackGeometryCollection()
         : base("Unpack Geometry Collection", "Unpack Collection", "Convert an Alidade collection back to Rhino geometry and its tree.",
-            "Alidade", "Convert") { }
+            "Convert") { }
 
     public override Guid ComponentGuid => new("41b84810-df87-4080-b29b-b731a9d53196");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("UnpackCollection");
+    protected override int OriginalOutputCount => 3;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
         manager.AddParameter(new AlidadeCollectionParameter());
-        manager.AddTextParameter("Target units", "U", "Rhino unit name or mm, cm, m, in or ft. Uses the Rhino document when omitted.",
+        manager.AddTextParameter("Target Units", "Target Units", "Rhino unit name or mm, cm, m, in or ft. Uses the Rhino document when omitted.",
             GH_ParamAccess.item);
         manager[1].Optional = true;
     }
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
-        manager.AddGenericParameter("Geometry", "G", "Rhino geometry with the original branch paths and slots.", GH_ParamAccess.tree);
-        manager.AddTextParameter(CollectionOutputs.GeometryIdsName, "K", GeometryIdsDescription, GH_ParamAccess.tree);
-        manager.AddTextParameter("Diagnostics", "D", "Conversion messages at the original paths and item indices.", GH_ParamAccess.tree);
-        manager.AddTextParameter(CollectionOutputs.GeometryNamesName, "N", "Display names aligned with the returned Geometry tree.", GH_ParamAccess.tree);
-    }
-
-    public override bool Read(GH_IReader reader)
-    {
-        ComponentArchive.RestoreAppendedParameter(reader, Params.Output[3], 3, input: false);
-        return CollectionOutputs.ReadGeometryIds(base.Read(reader), Params.Output[1], GeometryIdsDescription);
+        manager.AddGenericParameter("Geometry", "Geometry", "Rhino geometry with the original branch paths and slots.", GH_ParamAccess.tree);
+        manager.AddTextParameter(CollectionOutputs.GeometryIdsName, CollectionOutputs.GeometryIdsName, GeometryIdsDescription, GH_ParamAccess.tree);
+        manager.AddTextParameter("Diagnostics", "Diagnostics", "Conversion messages at the original paths and item indices.", GH_ParamAccess.tree);
+        manager.AddTextParameter(CollectionOutputs.GeometryNamesName, CollectionOutputs.GeometryNamesName,
+            "Display names aligned with the returned Geometry tree.", GH_ParamAccess.tree);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)

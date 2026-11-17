@@ -61,21 +61,23 @@ public sealed class GeometryCollection
             throw Invalid("Expected a supported collection in Project metres.");
 
         var keys = new HashSet<string>(StringComparer.Ordinal);
-        var comparePaths = Comparer<int[]>.Create((left, right) => left.AsSpan().SequenceCompareTo(right));
-        var branches = new SortedDictionary<int[], JsonElement>(comparePaths);
+        var source = payload.GetProperty("branches");
+        var entries = Elements(source, "branches");
+        var branches = new List<(int[] Path, JsonElement Value)>(source.GetArrayLength());
         var previousPath = Array.Empty<int>();
         var outOfOrder = false;
         var slots = 0;
         var geometryCount = 0;
         var hasNames = false;
-        foreach (var branch in Elements(payload.GetProperty("branches"), "branches"))
+        foreach (var branch in entries)
         {
             Fields(branch, new[] { "path", "items" });
             var path = Elements(branch.GetProperty("path"), "path", 1).Select(value => Integer(value, "path")).ToArray();
-            if (!branches.TryAdd(path, branch))
-                throw new CollectionFormatException(new("INVALID_COLLECTION", "Duplicate branch path.", path, Field: "path"));
-
-            outOfOrder |= comparePaths.Compare(previousPath, path) > 0;
+            var order = previousPath.AsSpan().SequenceCompareTo(path);
+            if (order == 0)
+                throw DuplicatePath(path);
+            outOfOrder |= order > 0;
+            branches.Add((path, branch));
             previousPath = path;
             var index = 0;
             foreach (var item in Elements(branch.GetProperty("items"), "items"))
@@ -112,9 +114,18 @@ public sealed class GeometryCollection
         }
 
         if (outOfOrder)
-            payload = Snapshot(branches.Values, schemaVersion);
+        {
+            branches.Sort((left, right) => left.Path.AsSpan().SequenceCompareTo(right.Path));
+            for (var index = 1; index < branches.Count; index++)
+                if (branches[index - 1].Path.AsSpan().SequenceEqual(branches[index].Path))
+                    throw DuplicatePath(branches[index].Path);
+            payload = Snapshot(branches.Select(branch => branch.Value), schemaVersion);
+        }
         return new GeometryCollection(payload, schemaVersion, branches.Count, slots, geometryCount, hasNames);
     }
+
+    private static CollectionFormatException DuplicatePath(int[] path) =>
+        new(new("INVALID_COLLECTION", "Duplicate branch path.", path, Field: "path"));
 
     internal static JsonElement Snapshot<T>(IEnumerable<T> branches, int schemaVersion) => JsonSerializer.SerializeToElement(
         new { schemaVersion, units = "m", space = "project", branches });

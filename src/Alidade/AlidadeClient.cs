@@ -26,8 +26,6 @@ internal static partial class AlidadeClient
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    internal static bool HasInvitationPrefix(string code) => code.StartsWith(InvitationPrefix, StringComparison.Ordinal);
-
     public static async Task<ProjectSession> PairAsync(string code, ulong documentId, CancellationToken cancellation)
     {
         try
@@ -138,7 +136,7 @@ internal static partial class AlidadeClient
     private static (Uri Endpoint, string Invite, Guid InstanceId) ReadInvitation(string code)
     {
         code = code.Trim();
-        if (code.Length <= 4096 && HasInvitationPrefix(code))
+        if (code.Length <= 4096 && code.StartsWith(InvitationPrefix, StringComparison.Ordinal))
         {
             try
             {

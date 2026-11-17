@@ -12,7 +12,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     private sealed record Binding(string ProjectId, string PortId, string Direction);
 
     private ProjectSession? _project;
-    private IReadOnlyList<GeometryPort>? _items;
+    private IReadOnlyList<GeometryPortReference>? _items;
     private Binding? _binding;
     private bool HasPortId => Params.Input[1].SourceCount != 0 || Params.Input[1].VolatileDataCount != 0;
 
@@ -25,7 +25,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
         manager.AddParameter(new AlidadeProjectParameter());
-        manager.AddTextParameter("Port ID", "ID", "Optional Asterism port ID. When omitted, select a port from the component menu.",
+        manager.AddTextParameter("Port ID", "Port ID", "Optional Asterism port ID. When omitted, select a port from the component menu.",
             GH_ParamAccess.item);
         manager[0].Optional = manager[1].Optional = true;
     }
@@ -33,7 +33,7 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
         manager.AddParameter(new AlidadePortReferenceParameter());
-        manager.AddTextParameter("Status", "S", "Selection and readiness.", GH_ParamAccess.item);
+        manager.AddTextParameter("Status", "Status", "Selection and readiness.", GH_ParamAccess.item);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -62,12 +62,11 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
         else if (portId == null) status = _items.Count == 0 ? "No exchange ports" : "Choose a port";
         else
         {
-            var item = _items.FirstOrDefault(candidate => candidate.Id == portId
+            var target = _items.FirstOrDefault(candidate => candidate.PortId == portId
                 && (binding == null || candidate.Direction == binding.Direction));
-            if (item == null) status = error = AlidadeClient.ErrorMessage("PORT_NOT_FOUND");
+            if (target == null) status = error = AlidadeClient.ErrorMessage("PORT_NOT_FOUND");
             else
             {
-                var target = item.Reference(project.Status);
                 data.SetData(0, new AlidadePortReference(target));
                 status = $"{target.DisplayName} ({target.Direction})";
             }
@@ -88,9 +87,8 @@ public sealed class SelectAsterismPort : AlidadeAsyncComponent
         menu.Items.Add(list);
         foreach (var item in _items)
         {
-            var binding = new Binding(project.Status.ProjectId, item.Id, item.Direction);
-            var name = GeometryPortReference.Display(item.Name, item.Id);
-            Menu_AppendItem(list.DropDown, $"{name} ({item.Direction})", (_, _) => Select(project, binding), true, _binding == binding);
+            var binding = new Binding(item.ProjectId, item.PortId, item.Direction);
+            Menu_AppendItem(list.DropDown, $"{item.DisplayName} ({item.Direction})", (_, _) => Select(project, binding), true, _binding == binding);
         }
     }
 

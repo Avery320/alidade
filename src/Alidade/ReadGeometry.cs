@@ -1,10 +1,6 @@
 using System;
-using System.Diagnostics;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using Grasshopper.Kernel;
-using GH_IO.Serialization;
 
 namespace Torquetum.Alidade;
 
@@ -20,6 +16,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
 
     public override Guid ComponentGuid => new("aecf9292-0da8-4783-9ca6-2aeedf326acc");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("ReadGeometry");
+    protected override int OriginalInputCount => 2;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
@@ -33,7 +30,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
     {
         manager.AddParameter(new AlidadeCollectionParameter());
         manager.AddParameter(new AlidadePortReferenceParameter());
-        manager.AddTextParameter("Status", "S", "Latest read status.", GH_ParamAccess.item);
+        manager.AddTextParameter("Status", "Status", "Latest read status.", GH_ParamAccess.item);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -93,38 +90,15 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
         var document = OnPingDocument();
         _collection = null;
         if (_input is { } input && CanUseProject(document, input.Project))
-            StartRequest(document, input.Project, cancellation => ReadOutputAsync(input, document.RuntimeID, cancellation),
+            StartRequest(document, input.Project,
+                cancellation => AlidadeClient.ReadGeometryAsync(input.Project, document.RuntimeID, input.Target, cancellation, input.Receipt),
                 result => _collection = result);
         else CancelRequest();
-    }
-
-    private static async Task<GeometryCollection> ReadOutputAsync(Input input, ulong documentId, CancellationToken cancellation)
-    {
-        var started = Stopwatch.GetTimestamp();
-        while (true)
-        {
-            try
-            {
-                return await AlidadeClient.ReadGeometryAsync(input.Project, documentId, input.Target, cancellation, input.Receipt)
-                    .ConfigureAwait(false);
-            }
-            catch (AlidadeConnectionException error) when (input.Receipt != null && error.Code == "OUTPUT_NOT_READY"
-                && Stopwatch.GetElapsedTime(started).TotalSeconds < 15)
-            {
-                await Task.Delay(500, cancellation).ConfigureAwait(false);
-            }
-        }
     }
 
     protected override void ResetState()
     {
         _input = null;
         _collection = null;
-    }
-
-    public override bool Read(GH_IReader reader)
-    {
-        ComponentArchive.RestoreAppendedParameter(reader, Params.Input[2], 2, input: true);
-        return base.Read(reader);
     }
 }

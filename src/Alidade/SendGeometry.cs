@@ -3,7 +3,6 @@ using System.Net;
 using System.Windows.Forms;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
-using GH_IO.Serialization;
 
 namespace Torquetum.Alidade;
 
@@ -34,12 +33,13 @@ public sealed class SendGeometry : AlidadeAsyncComponent
 
     public override Guid ComponentGuid => new("9d700ca8-b14a-4b59-b587-4d86490a705f");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("SendGeometry");
+    protected override int OriginalInputCount => 3;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
         manager.AddParameter(new AlidadeProjectParameter());
         manager.AddParameter(new AlidadeCollectionParameter());
-        manager.AddParameter(new AlidadePortReferenceParameter(), "Target", "T", "Asterism input to update.", GH_ParamAccess.item);
+        manager.AddParameter(new AlidadePortReferenceParameter(), "Target", "Target", "Asterism input to update.", GH_ParamAccess.item);
         manager.AddBooleanParameter("Send", "Send", "Connect a Grasshopper Button to send once per press.", GH_ParamAccess.item);
         for (var i = 0; i < 4; i++)
             manager[i].Optional = true;
@@ -49,7 +49,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
     {
         manager.AddParameter(new AlidadeWriteReceiptParameter());
         manager.AddParameter(new AlidadePortReferenceParameter());
-        manager.AddTextParameter("Status", "S", "Send status for the current geometry and target.", GH_ParamAccess.item);
+        manager.AddTextParameter("Status", "Status", "Send status for the current geometry and target.", GH_ParamAccess.item);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -107,7 +107,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         if (project == null)
             return (null, "Connect Project");
         if (SingleInput<AlidadeCollection>(data, 1)?.Value is not { GeometryCount: > 0 } collection)
-            return (null, "Connect Geometry Collection");
+            return (null, "Connect Collection");
         if (ConnectedPort(data, 2, project, "input") is not { } reference)
             return (null, "Choose Input");
         var input = new Inputs(project, collection, reference);
@@ -149,7 +149,8 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         try
         {
             var target = input.Target;
-            if (_attempt is { Receipt: { State: "committed", ETag: { } tag } } previous && previous.Target == target)
+            if (_attempt is { Receipt: { State: "committed", ETag: { } tag } } previous
+                && previous.Target.PortId == target.PortId && previous.Target.ETag == target.ETag)
                 target = target with { ETag = tag };
             var request = AlidadeClient.PrepareWrite(input.Collection, target);
             _attempt = new Attempt
@@ -225,11 +226,5 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         _attempt = null;
         _prepareError = null;
         _triggerHigh = true;
-    }
-
-    public override bool Read(GH_IReader reader)
-    {
-        ComponentArchive.RestoreAppendedParameter(reader, Params.Input[3], 3, input: true);
-        return base.Read(reader);
     }
 }

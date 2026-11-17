@@ -19,13 +19,13 @@ dotnet build src/Alidade/Alidade.csproj --configuration Release
 將建置產物 `Alidade.gha` 複製到 Grasshopper 載入第三方元件的資料夾，或把建置目錄加入 Rhino 的 `GrasshopperDeveloperSettings`。重新啟動 Rhino，開啟 Grasshopper，從 **Alidade** 分類加入元件。Rhino 與 Torquetum Desktop 或本機 Web 需在同一台電腦執行。 [McNeel Grasshopper 組件目錄說明](https://developer.rhino3d.com/api/gh1/type/grasshopper.folders/)
 
 1. 在 Asterism 放置 **Geometry Input** 和 **Geometry Output**，接通中間的 `Geometry`。
-2. 在 Torquetum 的 **Project Settings** 按 **Copy Grasshopper pairing code**，再按 Grasshopper 的 **Pair with Torquetum**。若出現視窗，貼上配對碼。把 `Project` 接到兩個 Select、Send 與 Read。
+2. 在 Torquetum 的 **Project Settings** 按 **Copy Grasshopper pairing code**。將配對碼貼入 Grasshopper Panel 並接到 **Connect to Torquetum** 的 `Pairing Code`，將 Boolean Toggle 接到 `Connect` 並切成 `True`。把 `Project` 接到兩個 Select、Send 與 Read。
 3. 從兩個 **Select Asterism Port** 的 **Asterism ports** 選單分別選取 Input 和 Output。將 Input 接到 **Send Geometry**，將 Output 接到 **Read Geometry**。
-4. 透過 **Build Geometry Collection** 將 Rhino 幾何接入 Send，使用 **Send** 或按下接至其 `Send` 腳位的 Grasshopper Button。把 Send 的 `Receipt` 接到 Read 可取得指定寫入的結果，把 Read 的 `Collection` 接到 **Unpack Geometry Collection** 取回幾何。
+4. 透過 **Build Geometry Collection** 將 Rhino 幾何接入 Send，使用 **Send** 或按下接至其 `Send` 腳位的 Grasshopper Button。把 Send 的 `Write Receipt` 接到 Read 可取得指定寫入的結果，把 Read 的 `Collection` 接到 **Unpack Geometry Collection** 取回幾何。
 
-Build 和 Unpack 支援點、線、折線、平面、盒與網格。v2 另支援 STEP 面、殼與實體。轉換可離線操作，省略長度單位時使用 Rhino 模型單位。`Geometry IDs`（`K`）和 `Geometry Names`（`N`）是與幾何對齊的文字樹。重排時保留原 ID，名稱可修改。省略 ID 時由 Torquetum 配發，省略名稱時顯示 ID。
+Build 和 Unpack 支援點、線、折線、平面、盒與網格。v2 另支援 STEP 面、殼與實體。轉換可離線操作，省略長度單位時使用 Rhino 模型單位。`Geometry IDs` 和 `Geometry Names` 是與幾何對齊的文字樹。重排時保留原 ID，名稱可修改。省略 ID 時由 Torquetum 配發，省略名稱時顯示 ID。
 
-重新開檔後需配對。若其他用戶端更新了 Input，在 Select 執行 **Refresh list**。送出待確認時用 **Check result** 或 **Retry same request**。要將幾何儲存到 Station，請在 Asterism 執行 Bake。
+`Connect` 切成 `False` 會斷線。配對碼只能使用一次，成功後可清除 Panel 內容。斷線或重新開檔後，請使用新的配對碼。若其他用戶端更新了 Input，在 Select 執行 **Refresh list**。送出待確認時用 **Check result** 或 **Retry same request**。要將幾何儲存到 Station，請在 Asterism 執行 Bake。
 
 ## 本機驗收
 

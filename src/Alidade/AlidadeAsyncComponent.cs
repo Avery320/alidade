@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -10,12 +12,12 @@ using EtoApplication = Eto.Forms.Application;
 
 namespace Torquetum.Alidade;
 
-public abstract class AlidadeAsyncComponent : GH_Component
+public abstract class AlidadeAsyncComponent : AlidadeComponent
 {
     private CancellationTokenSource? _operation;
 
     protected AlidadeAsyncComponent(string name, string nickname, string description, string category)
-        : base(name, nickname, description, "Alidade", category) { }
+        : base(name, nickname, description, category) { }
 
     protected bool IsPending => _operation != null;
     private protected AlidadeConnectionException? Failure { get; private set; }
@@ -164,13 +166,39 @@ public abstract class AlidadeAsyncComponent : GH_Component
     }
 }
 
-internal static class ComponentArchive
+public abstract class AlidadeComponent : GH_Component
 {
-    internal static void RestoreAppendedParameter(GH_IReader reader, IGH_Param parameter, int index, bool input)
+    protected AlidadeComponent(string name, string nickname, string description, string category)
+        : base(name, nickname, description, "Alidade", category) { }
+
+    protected virtual int OriginalInputCount => Params.Input.Count;
+    protected virtual int OriginalOutputCount => Params.Output.Count;
+
+    public override bool Read(GH_IReader reader)
+    {
+        RestoreAppendedParameters(reader, "param_input", Params.Input, OriginalInputCount);
+        RestoreAppendedParameters(reader, "param_output", Params.Output, OriginalOutputCount);
+        var parameters = Params.Input.Concat(Params.Output);
+        var labels = parameters.Select(parameter => (parameter.Name, parameter.Description)).ToArray();
+        if (!base.Read(reader))
+            return false;
+
+        // Definitions store the previous labels alongside the wire identifiers.
+        foreach (var (parameter, (name, description)) in parameters.Zip(labels))
+        {
+            parameter.Name = parameter.NickName = name;
+            parameter.Description = description;
+        }
+        return true;
+    }
+
+    private static void RestoreAppendedParameters(GH_IReader reader, string name, IReadOnlyList<IGH_Param> parameters, int originalCount)
     {
         // Grasshopper treats missing parameter chunks as corruption, including ports added after this archive.
-        var name = input ? "param_input" : "param_output";
-        if (reader.FindChunk(name, index) == null && reader is GH_IWriter archive)
-            parameter.Write(archive.CreateChunk(name, index));
+        if (reader is not GH_IWriter archive)
+            return;
+        for (var index = originalCount; index < parameters.Count; index++)
+            if (reader.FindChunk(name, index) == null)
+                parameters[index].Write(archive.CreateChunk(name, index));
     }
 }

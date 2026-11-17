@@ -44,7 +44,7 @@ public sealed class AlidadeCollection : GH_Goo<GeometryCollection?>
 public sealed class AlidadeCollectionParameter : GH_Param<AlidadeCollection>
 {
     public AlidadeCollectionParameter()
-        : base("Collection", "C", "An Alidade geometry collection.", "Alidade", "Convert", GH_ParamAccess.item) { }
+        : base("Collection", "Collection", "An Alidade geometry collection.", "Alidade", "Convert", GH_ParamAccess.item) { }
 
     public override Guid ComponentGuid => new("902dcc31-d44a-4054-b739-35fa6fba2a4b");
     public override GH_Exposure Exposure => GH_Exposure.hidden;
