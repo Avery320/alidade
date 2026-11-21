@@ -10,8 +10,8 @@ namespace Torquetum.Alidade;
 
 internal static partial class AlidadeClient
 {
-    private const string InvitationPrefix = "ALIDADE1.";
-    private const int ApiVersion = 1;
+    private const string InvitationPrefix = "TORAPI.";
+    private const string ApiPrefix = "/v0.0";
 
     private static readonly HttpClient Http = new(new SocketsHttpHandler
     {
@@ -31,13 +31,11 @@ internal static partial class AlidadeClient
         try
         {
             var invitation = ReadInvitation(code);
-            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(invitation.Endpoint, "/v1/pair"));
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(invitation.Endpoint, ApiPrefix + "/pair"));
             request.Content = JsonContent.Create(new
             {
                 invite = invitation.Invite,
                 clientName = "Alidade for Grasshopper",
-                apiVersion = ApiVersion,
-                collectionVersion = GeometryCollection.Version,
             });
             var grant = await SendAsync<Grant>(request, cancellation).ConfigureAwait(false);
             if (grant.InstanceId != invitation.InstanceId ||
@@ -56,7 +54,7 @@ internal static partial class AlidadeClient
     {
         try
         {
-            using var request = project.Request(documentId, HttpMethod.Get, "/v1/project");
+            using var request = project.Request(documentId, HttpMethod.Get, ApiPrefix + "/project");
             var status = (await SendAsync<ProjectResponse>(request, cancellation).ConfigureAwait(false)).Status();
             if (!project.Status.Matches(status.ProjectId, status.InstanceId))
                 throw new AlidadeConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
@@ -146,7 +144,7 @@ internal static partial class AlidadeClient
             catch (FormatException) { }
             catch (JsonException) { }
         }
-        throw new AlidadeConnectionException("Copy a complete Alidade pairing code from Torquetum Project Settings.", code: "INVITE_INVALID");
+        throw new AlidadeConnectionException("Copy a complete pairing code from Torquetum Project Settings.", code: "INVITE_INVALID");
     }
 
     private static Guid? ReadInstanceId(string? credential)
@@ -184,8 +182,6 @@ internal static partial class AlidadeClient
         public required string ProjectId { get; init; }
         public required Guid InstanceId { get; init; }
         public required string ProjectName { get; init; }
-        public required int ApiVersion { get; init; }
-        public required int CollectionVersion { get; init; }
         public required bool CanRead { get; init; }
         public required bool CanWrite { get; init; }
         public ProjectLimits? Limits { get; init; }
@@ -194,9 +190,7 @@ internal static partial class AlidadeClient
         public ProjectStatus Status()
         {
             if (string.IsNullOrWhiteSpace(ProjectId) || InstanceId == Guid.Empty ||
-                string.IsNullOrWhiteSpace(ProjectName) || ApiVersion != AlidadeClient.ApiVersion ||
-                CollectionVersion != GeometryCollection.Version ||
-                (CanWrite && !CanRead))
+                string.IsNullOrWhiteSpace(ProjectName) || (CanWrite && !CanRead))
                 throw new JsonException();
             if (Limits?.MaxBodyBytes is not (> 0 and var advertised))
                 throw new JsonException();

@@ -15,12 +15,12 @@ internal sealed record GeometryReceipt(bool Pending, string? Error = null, DateT
 
 internal static partial class AlidadeClient
 {
-    private const string AsterismRoute = "/v1/asterism";
+    private const string AsterismRoute = ApiPrefix + "/asterism";
 
     private sealed record PortDescription(string Id, string Direction, string? ETag);
     private sealed record PortDirectory(PortDescription[] Items);
     private sealed record ReceiptResponse(Guid RequestId, string State, ReceiptResult? Result);
-    private sealed record ReceiptResult(int HttpStatus, string? PortId, string? ETag, ErrorDetails? Error);
+    private sealed record ReceiptResult(int HttpStatus, string? Id, string? ETag, ErrorDetails? Error);
 
     internal static async Task<GeometryWriteRequest> PrepareWriteAsync(ProjectSession project, ulong documentId,
         string portId, GeometryCollection collection, CancellationToken cancellation)
@@ -74,7 +74,7 @@ internal static partial class AlidadeClient
         {
             request.Content = new ReadOnlyMemoryContent(write.Payload);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            request.Headers.Add("X-Alidade-Request-Id", write.Id.ToString("D"));
+            request.Headers.Add("X-Tor-Request-Id", write.Id.ToString("D"));
             request.Headers.IfMatch.Add(EntityTagHeaderValue.Parse(write.ETag));
 
             using var response = await SendForStatusAsync(request, HttpStatusCode.Accepted, cancellation).ConfigureAwait(false);
@@ -118,7 +118,7 @@ internal static partial class AlidadeClient
         {
             "pending" when receipt.Result == null => new(Pending: true, RetryAfter: RetryAfter(response)),
             "committed" when receipt.Result is { HttpStatus: 200 } committed
-                && committed.PortId == write.PortId && StrongTag(committed.ETag) =>
+                && committed.Id == write.PortId && StrongTag(committed.ETag) =>
                 new(Pending: false),
             "rejected" when receipt.Result is { HttpStatus: >= 400 and < 600 } rejected && rejected.Error != null =>
                 new(Pending: false, Error: ErrorException(rejected.Error, (HttpStatusCode)rejected.HttpStatus).Message),
@@ -126,7 +126,7 @@ internal static partial class AlidadeClient
         };
     }
 
-    private static string ReceiptRoute(Guid requestId) => $"/v1/requests/{requestId:D}";
+    private static string ReceiptRoute(Guid requestId) => $"{ApiPrefix}/requests/{requestId:D}";
 
     private static bool StrongTag(string? value) =>
         EntityTagHeaderValue.TryParse(value, out var tag) && !tag.IsWeak && tag.Tag != "*";

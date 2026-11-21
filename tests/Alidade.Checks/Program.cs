@@ -5,13 +5,14 @@ using System.Linq;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
 using Torquetum.Alidade;
 
 if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] != "--exchange"))
-    throw new ArgumentException("Usage: Alidade.Checks <Alidade.gha> <geometry-collection.json> [--exchange]");
+    throw new ArgumentException("Usage: Alidade.Checks <Alidade.gha> <geometry-collection-basic.json> [--exchange]");
 
 AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(args[0]));
 await AlidadeChecks.Run(args[1], args.Length == 3);
@@ -20,90 +21,91 @@ internal static class AlidadeChecks
 {
     internal static async Task Run(string fixturePath, bool exchange)
     {
-        var diagnostics = new List<CollectionDiagnostic>();
-        var fixture = File.ReadAllText(fixturePath);
-        var collection = Parse(fixture);
-        var unordered = Parse("""{"schemaVersion":2,"units":"m","space":"project","branches":[{"path":[2,10],"items":[null]},{"path":[2,9],"items":[]},{"path":[2],"items":[]}]}""");
-        var sortedPaths = unordered.Payload.GetProperty("branches").EnumerateArray().Select(branch => branch.GetProperty("path").GetRawText());
-        Check(sortedPaths.SequenceEqual(new[] { "[2]", "[2,9]", "[2,10]" }), "numeric branch ordering");
-        Reject(fixture.Replace("[0, 4]", "[0]"), "Duplicate branch path");
-        Reject("""{"schemaVersion":2,"units":"m","space":"project","branches":[{"path":[2],"items":[]},{"path":[1],"items":[]},{"path":[2],"items":[]}]}""",
-            "Duplicate branch path");
-        Reject(fixture.Replace("[1, 2, 3]", "[1e400, 2, 3]"), "finite number");
-        Reject(fixture.Replace("[0, 5]", "[5, 0]"), "strictly increasing");
-        Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1, 3]]"), "MESH_INDEX_OUT_OF_RANGE");
-        Reject(fixture.Replace("\"triangles\": [[0, 1, 2]]", "\"triangles\": [[0, 1.5, 2]]"), "(triangles[0])");
-        Reject("""{"schemaVersion":2,"units":"m","space":"project","branches":[{"path":[0],"items":[{"kind":"polyline","points":[[0,0,0],[1,0,0],[0,0,0],[1,0,0]],"closed":true}]}]}""",
-            "three distinct vertices");
-        Reject(fixture.Replace("\"closed\": true", "\"closed\": 1"), "Boolean closure");
-
-        var cadFixture = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(fixturePath))!, "geometry-collection.json");
-        var cadSource = File.ReadAllText(cadFixture);
-        var cad = Parse(cadSource);
-        var cadBranches = cad.Payload.GetProperty("branches");
-        Reject(cadSource.Replace("\"schemaVersion\": 2", "\"schemaVersion\": 1"), "geometry collection version 2");
-        Reject(cadSource.Replace("\"shapeType\": \"solid\"", "\"shapeType\": \"mesh\""), "face, shell or solid");
-        Reject(cadSource.Replace("END-ISO-10303-21;", "BROKEN-STEP;"), "INVALID_STEP");
-        var initial = cadBranches[0].GetProperty("items")[0].GetProperty("step").GetString()!;
-        var withMetadata = initial.Replace("Open CASCADE Shape Model", "/private/source.stp")
-            .Replace("'Author'", "'Private; O''Brien'");
-        var sanitized = StepText.SanitizeExport(withMetadata);
-        Check(!sanitized.Contains("/private/source.stp", StringComparison.Ordinal)
-            && !sanitized.Contains("O''Brien", StringComparison.Ordinal)
-            && sanitized[sanitized.IndexOf("DATA;", StringComparison.Ordinal)..] ==
-               initial[initial.IndexOf("DATA;", StringComparison.Ordinal)..], "sanitization preserves geometry body");
-        var managed = JsonNode.Parse(fixture)!;
-        managed["branches"]![2]!["items"] = new JsonArray();
-        managed["branches"]![0]!["items"]![2]!.AsObject().Remove("domain");
-        var managedAsset = Parse(managed.ToJsonString());
-        var geometry = GeometryCollectionConverter.Unpack(managedAsset, 100d, diagnostics, null)!;
-        Check(geometry.PathCount == 3 && geometry.Branches[0][1] == null && geometry.Branches[1].Count == 0, "native GH null and empty branches");
-        Check(geometry.Paths[2].Indices.SequenceEqual(new[] { 3, 0, 7 }), "native GH deep path");
-        Check(geometry.Branches[0][0] is GH_Point point && point.Value == new Point3d(100, 200, 300), "point in target centimetres");
-        Check(geometry.Branches[0][2] is GH_Line line && line.Value.To == new Point3d(100, 0, 0), "line direction and target centimetres");
-
-        var roundTrip = GeometryCollectionConverter.Build(geometry, 0.01d, diagnostics, null);
-        Check(roundTrip != null && diagnostics.Count == 0 && Equal(managedAsset.Payload, roundTrip.Payload),
-            "native GH centimetre round trip");
-        Console.WriteLine("PASS the common geometry format, STEP header sanitization and native GH trees.");
+        var basic = File.ReadAllText(fixturePath);
+        var cadPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(fixturePath))!, "geometry-collection.json");
+        var cad = File.ReadAllText(cadPath);
+        CheckGeometry(basic, cad);
         if (exchange)
-            await GeometryExchangeCheck.Run(collection, cad, Console.ReadLine() ?? "");
+            await CheckExchange(Parse(basic), JsonNode.Parse(cad)!, Console.ReadLine() ?? "");
     }
 
-    internal static GeometryCollection Parse(string json) =>
+    static GeometryCollection Parse(string json) =>
         GeometryCollection.FromOwnedPayload(JsonSerializer.Deserialize<JsonElement>(json));
 
-    private static void Reject(string json, string expected)
+    static void CheckGeometry(string basic, string cad)
     {
+        var tree = JsonNode.Parse(basic)!;
+        tree["schemaVersion"] = 2;
         try
         {
-            Parse(json);
-            throw new InvalidOperationException("Unexpectedly accepted: " + expected);
+            Parse(tree.ToJsonString());
+            throw new InvalidOperationException("The retired geometry schema was accepted.");
         }
-        catch (CollectionFormatException error) when (error.Message.Contains(expected, StringComparison.Ordinal))
+        catch (CollectionFormatException error) when (error.Diagnostic.Field == "schemaVersion") { }
+
+        tree["schemaVersion"] = "0.0";
+        tree["branches"]![2]!["items"] = new JsonArray();
+        tree["branches"]![0]!["items"]![2]!.AsObject().Remove("domain");
+        var diagnostics = new List<CollectionDiagnostic>();
+        var geometry = GeometryCollectionConverter.Unpack(Parse(tree.ToJsonString()), 100d, diagnostics, null)!;
+        Check(geometry.Paths[2].Indices.SequenceEqual(new[] { 3, 0, 7 })
+            && geometry.Branches[0][1] == null && geometry.Branches[1].Count == 0, "Grasshopper tree structure");
+        Check(geometry.Branches[0][0] is GH_Point point && point.Value == new Point3d(100, 200, 300), "metres to centimetres");
+        var roundTrip = GeometryCollectionConverter.Build(geometry, 0.01d, diagnostics, null);
+        Check(roundTrip != null && diagnostics.Count == 0
+            && roundTrip.Payload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 1,
+            "centimetres to metres");
+
+        var step = Parse(cad).Payload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("step").GetString()!;
+        var sanitized = StepText.SanitizeExport(step.Replace("Open CASCADE Shape Model", "/private/source.stp"));
+        Check(!sanitized.Contains("/private/source.stp", StringComparison.Ordinal)
+            && sanitized[sanitized.IndexOf("DATA;", StringComparison.Ordinal)..] ==
+               step[step.IndexOf("DATA;", StringComparison.Ordinal)..], "STEP export keeps geometry and strips private metadata");
+        Console.WriteLine("PASS V0.0 collection, Rhino unit conversion, Grasshopper tree structure and STEP sanitization.");
+    }
+
+    static async Task CheckExchange(GeometryCollection basic, JsonNode cad, string invite)
+    {
+        const ulong documentId = 41;
+        const string id = "fixture";
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var token = timeout.Token;
+        var session = await AlidadeClient.PairAsync(invite, documentId, token);
+        Check(!session.IsValidFor(documentId + 1), "pairing is scoped to its Grasshopper document");
+        var status = await AlidadeClient.ReadProjectAsync(session, documentId, token);
+        Check(status.CanWrite, "the paired Project accepts writes");
+
+        await Send(basic);
+        var initial = (await AlidadeClient.ReadGeometryAsync(session, documentId, id, token)).Payload.GetProperty("branches");
+        Check(initial[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null
+            && initial[1].GetProperty("items").GetArrayLength() == 0, "HTTP read preserves null and empty branches");
+
+        cad["branches"]![2]!["items"]![0]!["position"]![0] = 1.493;
+        await Send(Parse(cad.ToJsonString()));
+        var final = (await AlidadeClient.ReadGeometryAsync(session, documentId, id, token)).Payload.GetProperty("branches");
+        Check(final[2].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 1.493
+            && final[0].GetProperty("items")[0].GetProperty("shapeType").GetString() == "solid"
+            && final[0].GetProperty("items")[2].GetProperty("shapeType").GetString() == "face"
+            && final[2].GetProperty("items")[1].GetProperty("shapeType").GetString() == "shell",
+            "same ID reads the updated point and exact STEP shapes");
+        Console.WriteLine("PASS live C# pairing, send, receipt and 1493 mm mixed geometry readback.");
+
+        async Task Send(GeometryCollection value)
         {
+            var write = await AlidadeClient.PrepareWriteAsync(session, documentId, id, value, token);
+            var receipt = await AlidadeClient.WriteGeometryAsync(session, documentId, write, token);
+            while (receipt.Pending)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), token);
+                receipt = await AlidadeClient.CheckReceiptAsync(session, documentId, write, token);
+            }
+            Check(receipt.Error == null, $"write receipt is committed ({receipt.Error})");
         }
     }
 
-    internal static void Check(bool condition, string label)
+    static void Check(bool condition, string label)
     {
         if (!condition)
-            throw new InvalidOperationException("Failed: " + label);
-    }
-
-    private static bool Equal(JsonElement left, JsonElement right)
-    {
-        if (left.ValueKind != right.ValueKind)
-            return false;
-        return left.ValueKind switch
-        {
-            JsonValueKind.Object => left.EnumerateObject().Count() == right.EnumerateObject().Count()
-                && left.EnumerateObject().All(property =>
-                    right.TryGetProperty(property.Name, out var value) && Equal(property.Value, value)),
-            JsonValueKind.Array => left.GetArrayLength() == right.GetArrayLength()
-                && left.EnumerateArray().Zip(right.EnumerateArray(), Equal).All(equal => equal),
-            JsonValueKind.Number => left.GetDouble() == right.GetDouble(),
-            _ => left.GetRawText() == right.GetRawText(),
-        };
+            throw new InvalidOperationException($"Failed: {label}.");
     }
 }

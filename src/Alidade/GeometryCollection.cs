@@ -28,7 +28,7 @@ internal sealed class CollectionFormatException : FormatException
 /// <summary>An immutable geometry tree in Project coordinates and metres.</summary>
 public sealed class GeometryCollection
 {
-    internal const int Version = 2;
+    private const string SchemaVersion = "0.0";
     internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     private const double MinimumPlaneAxis = 1e-9;
     private static readonly string[] ItemFields = { "kind" };
@@ -52,8 +52,9 @@ public sealed class GeometryCollection
     internal static GeometryCollection FromOwnedPayload(JsonElement payload)
     {
         Fields(payload, new[] { "schemaVersion", "units", "space", "branches" });
-        if (Integer(payload.GetProperty("schemaVersion"), "schemaVersion") != Version)
-            throw Invalid("Expected geometry collection version 2.", "schemaVersion");
+        var version = payload.GetProperty("schemaVersion");
+        if (version.ValueKind != JsonValueKind.String || version.GetString() != SchemaVersion)
+            throw Invalid($"Expected Tor API geometry collection version {SchemaVersion}.", "schemaVersion");
         if (Text(payload.GetProperty("units"), "units") != "m"
             || Text(payload.GetProperty("space"), "space") != "project")
             throw Invalid("Expected a supported collection in Project metres.");
@@ -110,7 +111,7 @@ public sealed class GeometryCollection
         new(new("INVALID_COLLECTION", "Duplicate branch path.", path, Field: "path"));
 
     internal static JsonElement Snapshot<T>(IEnumerable<T> branches) => JsonSerializer.SerializeToElement(
-        new { schemaVersion = Version, units = "m", space = "project", branches });
+        new { schemaVersion = SchemaVersion, units = "m", space = "project", branches });
 
     private static void CheckItem(JsonElement item)
     {
