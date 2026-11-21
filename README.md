@@ -72,12 +72,12 @@ Build 與 Unpack 可離線操作。省略單位腳位時，依 Grasshopper 定�
 
 ## 本機驗收
 
-Tor API V0.0 的 HTTP 契約、Schema 和驗收樣本由 Torquetum 的 `tor-api/` 提供。準備與目前 Alidade 搭配的 Torquetum checkout。下方假設兩個儲存庫相鄰，並使用 macOS 上 Rhino 8 隨附的 .NET 執行檔。[Torquetum 整合 PR](https://github.com/Avery320/torquetum/pull/26)
+從公開的 Torquetum API repo 取得 V0.0 HTTP 契約、Schema 和驗收樣本。下方假設 `torquetum-api` 與 `alidade` 相鄰，並使用 macOS 上 Rhino 8 隨附的 .NET 執行檔。若已初始化 Torquetum 的 `tor-api/` submodule，也可用 `../torquetum/tor-api/fixtures`。 [Torquetum API](https://github.com/Avery320/torquetum-api)
 
 ```sh
 dotnet build tests/Alidade.Checks/Alidade.Checks.csproj -c Release --warnaserror
 alidade_rhino_resources="/Applications/Rhino 8.app/Contents/Frameworks/RhCore.framework/Versions/A/Resources"
-tor_api_fixtures="../torquetum/tor-api/fixtures"
+tor_api_fixtures="../torquetum-api/fixtures"
 "$alidade_rhino_resources/dotnet/$(uname -m)/dotnet" tests/Alidade.Checks/bin/Release/net7.0/Alidade.Checks.dll \
   src/Alidade/bin/Release/net7.0/Alidade.gha "$tor_api_fixtures/geometry-collection-basic.json"
 ```
