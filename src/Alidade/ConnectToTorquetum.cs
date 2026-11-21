@@ -12,11 +12,10 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
     private ProjectSession? _session;
 
     public ConnectToTorquetum()
-        : base("Connect to Torquetum", "Connect", "Pair with a running Torquetum project.", "Session") { }
+        : base("Connect to Torquetum", "Connect", "Pair with a Torquetum project.", "Session") { }
 
     public override Guid ComponentGuid => new("704efa3e-ae66-48c5-89fc-01ebffe84565");
     protected override Bitmap Icon => ComponentIcons.Load("Connect");
-    protected override int OriginalInputCount => 0;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
@@ -50,7 +49,11 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
             ResetState();
             _attemptedCode = code;
             StartRequest(document, null, cancellation => AlidadeClient.PairAsync(code, document.RuntimeID, cancellation),
-                session => _session = session, abandon: session => session.Disconnect());
+                session =>
+                {
+                    _session = session;
+                    session.Disconnected += RefreshConnectionOutput;
+                }, abandon: session => session.Disconnect());
         }
 
         if (IsPending || Failure != null || _session is not { } connected || !connected.IsValidFor(document.RuntimeID))
@@ -88,7 +91,18 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
 
     protected override void ResetState()
     {
-        _session?.Disconnect();
+        _attemptedCode = null;
+        if (_session is { } session)
+        {
+            session.Disconnected -= RefreshConnectionOutput;
+            session.Disconnect();
+        }
         _session = null;
+    }
+
+    private void RefreshConnectionOutput()
+    {
+        var document = OnPingDocument();
+        if (CanUse(document)) RequestSolution(document);
     }
 }

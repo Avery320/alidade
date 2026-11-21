@@ -28,39 +28,36 @@ internal sealed class CollectionFormatException : FormatException
 /// <summary>An immutable geometry tree in Project coordinates and metres.</summary>
 public sealed class GeometryCollection
 {
+    internal const int Version = 2;
     internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     private const double MinimumPlaneAxis = 1e-9;
-    private static readonly string[] ItemFields = { "kind", "itemKey", "name" };
-    private static readonly string[] CurveFields = { "kind", "itemKey", "name", "domain" };
+    private static readonly string[] ItemFields = { "kind" };
+    private static readonly string[] CurveFields = { "kind", "domain" };
 
-    private GeometryCollection(JsonElement payload, int schemaVersion, int branchCount, int count, int geometryCount, bool hasNames)
+    private GeometryCollection(JsonElement payload, int branchCount, int count, int geometryCount)
     {
         Payload = payload;
-        SchemaVersion = schemaVersion;
         BranchCount = branchCount;
         SlotCount = count;
         GeometryCount = geometryCount;
-        HasNames = hasNames;
     }
 
     public JsonElement Payload { get; }
-    public int SchemaVersion { get; }
     public int BranchCount { get; }
     public int SlotCount { get; }
     public int GeometryCount { get; }
-    internal bool HasNames { get; }
 
     public override string ToString() => $"{BranchCount} branches, {SlotCount} slots, {GeometryCount} geometries";
 
     internal static GeometryCollection FromOwnedPayload(JsonElement payload)
     {
         Fields(payload, new[] { "schemaVersion", "units", "space", "branches" });
-        var schemaVersion = Integer(payload.GetProperty("schemaVersion"), "schemaVersion");
-        if (schemaVersion is not (1 or 2) || Text(payload.GetProperty("units"), "units") != "m"
+        if (Integer(payload.GetProperty("schemaVersion"), "schemaVersion") != Version)
+            throw Invalid("Expected geometry collection version 2.", "schemaVersion");
+        if (Text(payload.GetProperty("units"), "units") != "m"
             || Text(payload.GetProperty("space"), "space") != "project")
             throw Invalid("Expected a supported collection in Project metres.");
 
-        var keys = new HashSet<string>(StringComparer.Ordinal);
         var source = payload.GetProperty("branches");
         var entries = Elements(source, "branches");
         var branches = new List<(int[] Path, JsonElement Value)>(source.GetArrayLength());
@@ -68,7 +65,6 @@ public sealed class GeometryCollection
         var outOfOrder = false;
         var slots = 0;
         var geometryCount = 0;
-        var hasNames = false;
         foreach (var branch in entries)
         {
             Fields(branch, new[] { "path", "items" });
@@ -86,21 +82,7 @@ public sealed class GeometryCollection
                 {
                     try
                     {
-                        CheckItem(item, schemaVersion);
-                        if (item.TryGetProperty("itemKey", out var keyValue))
-                        {
-                            var key = Text(keyValue, "itemKey");
-                            if (string.IsNullOrWhiteSpace(key))
-                                throw CollectionFormatException.At("INVALID_ITEM_KEY", "A Geometry ID cannot be blank.", "itemKey");
-                            if (!keys.Add(key))
-                                throw CollectionFormatException.At("DUPLICATE_ITEM_KEY", "Geometry IDs must be unique within a collection.", "itemKey");
-                        }
-                        if (item.TryGetProperty("name", out var name))
-                        {
-                            if (name.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(name.GetString()))
-                                throw CollectionFormatException.At("INVALID_ITEM_NAME", "A Geometry Name must be a nonblank string.", "name");
-                            hasNames = true;
-                        }
+                        CheckItem(item);
                         geometryCount++;
                     }
                     catch (CollectionFormatException error)
@@ -119,18 +101,18 @@ public sealed class GeometryCollection
             for (var index = 1; index < branches.Count; index++)
                 if (branches[index - 1].Path.AsSpan().SequenceEqual(branches[index].Path))
                     throw DuplicatePath(branches[index].Path);
-            payload = Snapshot(branches.Select(branch => branch.Value), schemaVersion);
+            payload = Snapshot(branches.Select(branch => branch.Value));
         }
-        return new GeometryCollection(payload, schemaVersion, branches.Count, slots, geometryCount, hasNames);
+        return new GeometryCollection(payload, branches.Count, slots, geometryCount);
     }
 
     private static CollectionFormatException DuplicatePath(int[] path) =>
         new(new("INVALID_COLLECTION", "Duplicate branch path.", path, Field: "path"));
 
-    internal static JsonElement Snapshot<T>(IEnumerable<T> branches, int schemaVersion) => JsonSerializer.SerializeToElement(
-        new { schemaVersion, units = "m", space = "project", branches });
+    internal static JsonElement Snapshot<T>(IEnumerable<T> branches) => JsonSerializer.SerializeToElement(
+        new { schemaVersion = Version, units = "m", space = "project", branches });
 
-    private static void CheckItem(JsonElement item, int schemaVersion)
+    private static void CheckItem(JsonElement item)
     {
         if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("kind", out var value))
             throw Invalid("Expected a geometry object with a kind.", "kind");
@@ -169,7 +151,7 @@ public sealed class GeometryCollection
                 ShapeFields("positions", "triangles");
                 CheckMesh(item);
                 break;
-            case "brep-step" when schemaVersion == 2:
+            case "brep-step":
                 ShapeFields("shapeType", "step");
                 if (Text(item.GetProperty("shapeType"), "shapeType") is not ("face" or "shell" or "solid"))
                     throw Invalid("Declare a STEP face, shell or solid.", "shapeType");
@@ -177,7 +159,7 @@ public sealed class GeometryCollection
                     throw CollectionFormatException.At("INVALID_STEP", "Expected a bounded STEP Part 21 document.", "step");
                 break;
             default:
-                throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind is unavailable in the declared collection version.", "kind");
+                throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind is unsupported.", "kind");
         }
     }
 

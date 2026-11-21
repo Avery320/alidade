@@ -9,9 +9,6 @@ namespace Torquetum.Alidade;
 
 internal static class CollectionOutputs
 {
-    internal const string GeometryIdsName = "Geometry IDs";
-    internal const string GeometryNamesName = "Geometry Names";
-
     internal static void WriteDiagnostics(GH_Component component, IGH_DataAccess data, int index,
         List<CollectionDiagnostic> diagnostics)
     {
@@ -29,29 +26,21 @@ internal static class CollectionOutputs
     }
 }
 
-public sealed class BuildGeometryCollection : AlidadeComponent
+public sealed class BuildGeometryCollection : GH_Component
 {
-    private const string GeometryIdsDescription =
-        "Stable, unique IDs at the same paths and slots as Geometry. Reuse an ID when updating the same item.";
-
     public BuildGeometryCollection()
         : base("Build Geometry Collection", "Build Collection", "Convert Rhino geometry and its tree to an Alidade collection.",
-            "Convert") { }
+            "Alidade", "Convert") { }
 
     public override Guid ComponentGuid => new("61799db7-0931-4460-b71c-a22097849a68");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("BuildCollection");
-    protected override int OriginalInputCount => 3;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
         manager.AddGenericParameter("Geometry", "Geometry", "Rhino geometry data tree.", GH_ParamAccess.tree);
-        manager.AddTextParameter(CollectionOutputs.GeometryIdsName, CollectionOutputs.GeometryIdsName, GeometryIdsDescription, GH_ParamAccess.tree);
         manager.AddTextParameter("Source Units", "Source Units", "Rhino unit name or mm, cm, m, in or ft. Uses the Rhino document when omitted.",
             GH_ParamAccess.item);
-        manager.AddTextParameter(CollectionOutputs.GeometryNamesName, CollectionOutputs.GeometryNamesName,
-            "Display names at the same paths and slots as Geometry. Omitted names default to the Geometry ID in Torquetum.", GH_ParamAccess.tree);
-        for (var i = 0; i < 4; i++)
-            manager[i].Optional = true;
+        manager[0].Optional = manager[1].Optional = true;
     }
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
@@ -69,11 +58,10 @@ public sealed class BuildGeometryCollection : AlidadeComponent
             if (Params.Input[0].SourceCount == 0 && (geometry == null || geometry.PathCount == 0))
                 throw CollectionFormatException.At("GEOMETRY_MISSING", "Connect a Rhino geometry tree.");
             string? units = null;
-            data.GetData(2, ref units);
+            data.GetData(1, ref units);
             var document = OnPingDocument()?.RhinoDocument;
             var scale = GeometryCollectionConverter.MetresPerUnit(units, document);
-            var collection = GeometryCollectionConverter.Build(geometry ?? new GH_Structure<IGH_Goo>(),
-                OptionalTextTree(data, 1), OptionalTextTree(data, 3), scale, diagnostics, document);
+            var collection = GeometryCollectionConverter.Build(geometry ?? new GH_Structure<IGH_Goo>(), scale, diagnostics, document);
             if (collection != null)
                 data.SetData(0, new AlidadeCollection(collection));
         }
@@ -84,26 +72,16 @@ public sealed class BuildGeometryCollection : AlidadeComponent
         data.DisableGapLogic();
         CollectionOutputs.WriteDiagnostics(this, data, 1, diagnostics);
     }
-
-    private GH_Structure<GH_String>? OptionalTextTree(IGH_DataAccess data, int index)
-    {
-        data.GetDataTree<GH_String>(index, out var tree);
-        if (tree is { PathCount: > 0 }) return tree;
-        return Params.Input[index].SourceCount == 0 ? null : new GH_Structure<GH_String>();
-    }
 }
 
-public sealed class UnpackGeometryCollection : AlidadeComponent
+public sealed class UnpackGeometryCollection : GH_Component
 {
-    private const string GeometryIdsDescription = "Persistent IDs aligned with the returned Geometry tree.";
-
     public UnpackGeometryCollection()
         : base("Unpack Geometry Collection", "Unpack Collection", "Convert an Alidade collection back to Rhino geometry and its tree.",
-            "Convert") { }
+            "Alidade", "Convert") { }
 
     public override Guid ComponentGuid => new("41b84810-df87-4080-b29b-b731a9d53196");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("UnpackCollection");
-    protected override int OriginalOutputCount => 3;
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
@@ -116,10 +94,7 @@ public sealed class UnpackGeometryCollection : AlidadeComponent
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
         manager.AddGenericParameter("Geometry", "Geometry", "Rhino geometry with the original branch paths and slots.", GH_ParamAccess.tree);
-        manager.AddTextParameter(CollectionOutputs.GeometryIdsName, CollectionOutputs.GeometryIdsName, GeometryIdsDescription, GH_ParamAccess.tree);
         manager.AddTextParameter("Diagnostics", "Diagnostics", "Conversion messages at the original paths and item indices.", GH_ParamAccess.tree);
-        manager.AddTextParameter(CollectionOutputs.GeometryNamesName, CollectionOutputs.GeometryNamesName,
-            "Display names aligned with the returned Geometry tree.", GH_ParamAccess.tree);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -136,19 +111,13 @@ public sealed class UnpackGeometryCollection : AlidadeComponent
             data.GetData(1, ref units);
             var document = OnPingDocument()?.RhinoDocument;
             var scale = GeometryCollectionConverter.MetresPerUnit(units, document);
-            var unpacked = GeometryCollectionConverter.Unpack(collection, 1 / scale, diagnostics, document);
-            if (unpacked is { } trees)
-            {
-                // The parameter types match these structures. Copy them without Grasshopper re-matching empty slots.
-                data.BlitData(0, trees.Geometry, overwrite: true);
-                data.BlitData(1, trees.Keys, overwrite: true);
-                data.BlitData(3, trees.Names, overwrite: true);
-            }
+            if (GeometryCollectionConverter.Unpack(collection, 1 / scale, diagnostics, document) is { } geometry)
+                data.BlitData(0, geometry, overwrite: true);
         }
         catch (CollectionFormatException error)
         {
             diagnostics.Add(error.Diagnostic);
         }
-        CollectionOutputs.WriteDiagnostics(this, data, 2, diagnostics);
+        CollectionOutputs.WriteDiagnostics(this, data, 1, diagnostics);
     }
 }

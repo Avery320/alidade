@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -12,12 +10,12 @@ using EtoApplication = Eto.Forms.Application;
 
 namespace Torquetum.Alidade;
 
-public abstract class AlidadeAsyncComponent : AlidadeComponent
+public abstract class AlidadeAsyncComponent : GH_Component
 {
     private CancellationTokenSource? _operation;
 
     protected AlidadeAsyncComponent(string name, string nickname, string description, string category)
-        : base(name, nickname, description, category) { }
+        : base(name, nickname, description, "Alidade", category) { }
 
     protected bool IsPending => _operation != null;
     private protected AlidadeConnectionException? Failure { get; private set; }
@@ -35,8 +33,8 @@ public abstract class AlidadeAsyncComponent : AlidadeComponent
     protected ProjectSession? ConnectedProject(IGH_DataAccess data, GH_Document? document) =>
         SingleInput<AlidadeProject>(data, 0)?.Value is { } session && CanUseProject(document, session) ? session : null;
 
-    protected GeometryPortReference? ConnectedPort(IGH_DataAccess data, int index, ProjectSession project, string direction) =>
-        SingleInput<AlidadePortReference>(data, index)?.Value is { } port && port.Matches(project, direction) ? port : null;
+    protected string? ExchangeId(IGH_DataAccess data, int index) =>
+        SingleInput<string>(data, index)?.Trim() is { Length: > 0 } id ? id : null;
 
     protected void ReportStatus(IGH_DataAccess data, int index, string status, string? warning)
     {
@@ -163,42 +161,5 @@ public abstract class AlidadeAsyncComponent : AlidadeComponent
         if (context == GH_DocumentContext.Close)
             InvalidateDocument(document);
         base.DocumentContextChanged(document, context);
-    }
-}
-
-public abstract class AlidadeComponent : GH_Component
-{
-    protected AlidadeComponent(string name, string nickname, string description, string category)
-        : base(name, nickname, description, "Alidade", category) { }
-
-    protected virtual int OriginalInputCount => Params.Input.Count;
-    protected virtual int OriginalOutputCount => Params.Output.Count;
-
-    public override bool Read(GH_IReader reader)
-    {
-        RestoreAppendedParameters(reader, "param_input", Params.Input, OriginalInputCount);
-        RestoreAppendedParameters(reader, "param_output", Params.Output, OriginalOutputCount);
-        var parameters = Params.Input.Concat(Params.Output);
-        var labels = parameters.Select(parameter => (parameter.Name, parameter.Description)).ToArray();
-        if (!base.Read(reader))
-            return false;
-
-        // Definitions store the previous labels alongside the wire identifiers.
-        foreach (var (parameter, (name, description)) in parameters.Zip(labels))
-        {
-            parameter.Name = parameter.NickName = name;
-            parameter.Description = description;
-        }
-        return true;
-    }
-
-    private static void RestoreAppendedParameters(GH_IReader reader, string name, IReadOnlyList<IGH_Param> parameters, int originalCount)
-    {
-        // Grasshopper treats missing parameter chunks as corruption, including ports added after this archive.
-        if (reader is not GH_IWriter archive)
-            return;
-        for (var index = originalCount; index < parameters.Count; index++)
-            if (reader.FindChunk(name, index) == null)
-                parameters[index].Write(archive.CreateChunk(name, index));
     }
 }

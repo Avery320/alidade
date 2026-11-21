@@ -1,6 +1,8 @@
 using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Threading;
+using GH_IO.Serialization;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
 
@@ -8,11 +10,8 @@ namespace Torquetum.Alidade;
 
 internal sealed record ProjectStatus(
     string ProjectId, Guid InstanceId, string ProjectName, bool CanRead, bool CanWrite,
-    string? AvailabilityReason, bool SupportsStep, bool GeometryNames, int MaxBodyBytes)
+    string? AvailabilityReason, int MaxBodyBytes)
 {
-    internal bool SupportsCollection(int version) => version == 1 || (version == 2 && SupportsStep);
-    internal string? CollectionWriteError(int version, bool hasNames) => !SupportsCollection(version) ? "STEP_UNSUPPORTED"
-        : hasNames && !GeometryNames ? "GEOMETRY_NAMES_UNSUPPORTED" : null;
     internal bool Matches(string projectId, Guid instanceId) => ProjectId == projectId && InstanceId == instanceId;
 }
 
@@ -33,12 +32,17 @@ public sealed class ProjectSession
     }
 
     internal ProjectStatus Status { get; set; }
+    internal event Action? Disconnected;
 
     internal bool IsValid => _accessToken != null && DateTimeOffset.UtcNow < _expiresAt;
 
     internal bool IsValidFor(ulong documentId) => IsValid && documentId == _documentId;
 
-    internal void Disconnect() => _accessToken = null;
+    internal void Disconnect()
+    {
+        if (Interlocked.Exchange(ref _accessToken, null) != null)
+            Disconnected?.Invoke();
+    }
 
     internal HttpRequestMessage Request(ulong documentId, HttpMethod method, string path)
     {
@@ -50,7 +54,7 @@ public sealed class ProjectSession
     }
 }
 
-public sealed class AlidadeProject : AlidadeLiveValue<ProjectSession>
+public sealed class AlidadeProject : GH_Goo<ProjectSession?>
 {
     public AlidadeProject() { }
     internal AlidadeProject(ProjectSession? session) : base(session) { }
@@ -61,6 +65,12 @@ public sealed class AlidadeProject : AlidadeLiveValue<ProjectSession>
     public override IGH_Goo Duplicate() => new AlidadeProject(Value);
     public override object ScriptVariable() => ToString();
     public override string ToString() => IsValid && Value is { } session ? session.Status.ProjectName : "Disconnected Alidade project";
+    public override bool Write(GH_IWriter writer) => true;
+    public override bool Read(GH_IReader reader)
+    {
+        Value = null;
+        return true;
+    }
 }
 
 public sealed class AlidadeProjectParameter : GH_Param<AlidadeProject>

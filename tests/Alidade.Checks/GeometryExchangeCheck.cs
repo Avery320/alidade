@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -12,98 +11,59 @@ internal static class GeometryExchangeCheck
     internal static async Task Run(GeometryCollection collection, GeometryCollection cadCollection, string invite)
     {
         const ulong documentId = 41;
+        const string id = "fixture";
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var token = timeout.Token;
 
         var session = await AlidadeClient.PairAsync(invite, documentId, token);
-        await ExpectError("PAIRING_REQUIRED", () => AlidadeClient.ListPortsAsync(session, documentId + 1, token));
+        await ExpectError("PAIRING_REQUIRED", () => AlidadeClient.ReadProjectAsync(session, documentId + 1, token));
+        await ExpectError("OUTPUT_UNAVAILABLE", () => ReadOutput());
 
-        var status = session.Status;
-        var refreshed = await AlidadeClient.ReadProjectAsync(session, documentId, token);
-        Check(refreshed.GeometryNames == status.GeometryNames, "project refresh preserves the negotiated names capability");
-        var ports = await AlidadeClient.ListPortsAsync(session, documentId, token);
-        var inputRef = ports.Single(port => port.Direction == "input");
-        var outputRef = ports.Single(port => port.Direction == "output");
-        var id = inputRef.PortId;
-        Check(inputRef.ETag != null && outputRef.ETag == null, "only inputs have an ETag");
-
-        await ExpectError("OUTPUT_NOT_READY", () => AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token));
-
-        var named = JsonNode.Parse(collection.Payload.GetRawText())!;
-        named["branches"]![0]!["items"]![0]!["name"] = "Fixture point";
-        var namedCollection = Parse(named.ToJsonString());
-        if (!status.GeometryNames)
-            await ExpectError("GEOMETRY_NAMES_UNSUPPORTED", () =>
-                AlidadeClient.WriteGeometryAsync(session, documentId, AlidadeClient.PrepareWrite(namedCollection, inputRef), token));
-
-        var send = AlidadeClient.PrepareWrite(status.GeometryNames ? namedCollection : collection, inputRef);
-        var committed = await Committed(send);
-        Check(committed.PortId == id && committed.ETag != null && committed.ETag != inputRef.ETag,
-            "send writes to the selected input and advances its revision");
-        var replay = await Committed(send);
-        Check(replay.RequestId == committed.RequestId && replay.PortId == id && replay.ETag == committed.ETag, "same write replay");
-
-        var original = await ReadOutput(committed);
+        var send = await Prepare(collection);
+        await Commit(send);
+        await Commit(send);
+        var original = await ReadOutput();
         Check(original.GetProperty("branches")[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null
             && original.GetProperty("branches")[1].GetProperty("items").GetArrayLength() == 0,
             "read preserves null and empty branch");
-        if (status.GeometryNames)
-            Check(original.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("name").GetString() == "Fixture point",
-                "negotiated Geometry Names survive the Output read");
-
-        await ExpectError("OUTPUT_REVISION_UNVERIFIED", () =>
-            AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, committed with { ETag = "\"unverified\"" }));
 
         var edited = JsonNode.Parse(original.GetRawText())!;
-        edited["branches"]![0]!["items"]![0]!["position"]![0] = 4;
-        var update = AlidadeClient.PrepareWrite(Parse(edited.ToJsonString()), await CurrentInput());
-        var updated = await Committed(update);
-        Check(updated.PortId == id && updated.ETag != null && updated.ETag != committed.ETag,
-            "update keeps input identity and advances its revision");
-
-        await ExpectError("INPUT_SUPERSEDED", () => AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, committed));
+        edited["branches"]![0]!["items"]![0]!["position"]![0] = 1.493;
+        var update = await Prepare(Parse(edited.ToJsonString()));
+        Check(update.ETag != send.ETag, "a committed write advances the input revision");
+        await Commit(update);
         await ExpectError("STALE_REVISION", () =>
-            AlidadeClient.WriteGeometryAsync(session, documentId, AlidadeClient.PrepareWrite(collection, inputRef), token));
+            AlidadeClient.WriteGeometryAsync(session, documentId, send with { Id = Guid.NewGuid() }, token));
+        var finalPayload = await ReadOutput();
+        Check(finalPayload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 1.493,
+            "the same output ID returns the result after the input is updated");
+        Console.WriteLine("PASS live C# pairing, document scoping, same ID in both directions, exact retry, latest output and stale write protection.");
 
-        var finalPayload = await ReadOutput(updated);
-        Check(finalPayload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 4,
-            "the same output port returns the graph result after input changes");
-        Console.WriteLine("PASS live C# pair, document scoping, port list, exact replay, output reads, superseded receipts and stale protection.");
+        await Commit(await Prepare(cadCollection));
+        var cadBranches = (await ReadOutput()).GetProperty("branches");
+        Check(cadBranches[0].GetProperty("items")[0].GetProperty("shapeType").GetString() == "solid"
+            && cadBranches[0].GetProperty("items")[2].GetProperty("shapeType").GetString() == "face"
+            && cadBranches[2].GetProperty("items")[0].GetProperty("kind").GetString() == "point"
+            && cadBranches[2].GetProperty("items")[1].GetProperty("shapeType").GetString() == "shell"
+            && cadBranches[2].GetProperty("items")[2].GetProperty("kind").GetString() == "line",
+            "read preserves mixed geometry and all three exact STEP item types");
+        Console.WriteLine("PASS points, lines and exact STEP shapes in one round trip through the live Project API.");
 
-        var cadWrite = AlidadeClient.PrepareWrite(cadCollection, await CurrentInput());
-        if (status.SupportsStep)
-        {
-            var cadPayload = await ReadOutput(await Committed(cadWrite));
-            var cadBranches = cadPayload.GetProperty("branches");
-            Check(cadPayload.GetProperty("schemaVersion").GetInt32() == 2
-                && cadBranches[0].GetProperty("items")[0].GetProperty("shapeType").GetString() == "solid"
-                && cadBranches[0].GetProperty("items")[2].GetProperty("shapeType").GetString() == "face"
-                && cadBranches[2].GetProperty("items")[1].GetProperty("shapeType").GetString() == "shell",
-                "read preserves all three exact STEP item types");
-            Console.WriteLine("PASS negotiated STEP solid, face and shell through the live Project API.");
-        }
-        else
-            await ExpectError("STEP_UNSUPPORTED", () => AlidadeClient.WriteGeometryAsync(session, documentId, cadWrite, token));
+        Task<GeometryWriteRequest> Prepare(GeometryCollection value) =>
+            AlidadeClient.PrepareWriteAsync(session, documentId, id, value, token);
 
-        async Task<GeometryPortReference> CurrentInput()
-        {
-            var listing = await AlidadeClient.ListPortsAsync(session, documentId, token);
-            return listing.Single(port => port.PortId == id);
-        }
+        async Task<JsonElement> ReadOutput() =>
+            (await AlidadeClient.ReadGeometryAsync(session, documentId, id, token)).Payload;
 
-        async Task<JsonElement> ReadOutput(GeometryReceipt receipt) =>
-            (await AlidadeClient.ReadGeometryAsync(session, documentId, outputRef, token, receipt)).Payload;
-
-        async Task<GeometryReceipt> Committed(GeometryWriteRequest write)
+        async Task Commit(GeometryWriteRequest write)
         {
             var receipt = await AlidadeClient.WriteGeometryAsync(session, documentId, write, token);
-            while (receipt.State == "pending")
+            while (receipt.Pending)
             {
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
-                receipt = await AlidadeClient.CheckReceiptAsync(session, documentId, write.Id, id, token);
+                receipt = await AlidadeClient.CheckReceiptAsync(session, documentId, write, token);
             }
-            Check(receipt.State == "committed", $"write receipt is committed ({receipt.Message})");
-            return receipt;
+            Check(receipt.Error == null, $"write receipt is committed ({receipt.Error})");
         }
     }
 

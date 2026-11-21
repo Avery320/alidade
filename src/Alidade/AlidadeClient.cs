@@ -37,8 +37,7 @@ internal static partial class AlidadeClient
                 invite = invitation.Invite,
                 clientName = "Alidade for Grasshopper",
                 apiVersion = ApiVersion,
-                collectionVersions = new[] { 1, 2 },
-                geometryNames = true,
+                collectionVersion = GeometryCollection.Version,
             });
             var grant = await SendAsync<Grant>(request, cancellation).ConfigureAwait(false);
             if (grant.InstanceId != invitation.InstanceId ||
@@ -118,17 +117,15 @@ internal static partial class AlidadeClient
     {
         "INVITE_INVALID" => "The invitation is unavailable. Copy a new invitation from Torquetum.",
         "PAIRING_REQUIRED" => "Pair with the project again.",
-        "PORT_NOT_FOUND" => "The Asterism port is unavailable or has the wrong direction. Refresh the port list.",
-        "STALE_REVISION" => "The Asterism input has changed. Refresh the port list, then choose Send again.",
+        "PORT_NOT_FOUND" => "Check the ID on the matching Asterism node.",
+        "STALE_REVISION" => "The Asterism input has changed. Use Send again for its current version.",
         "REQUEST_UNKNOWN" => "Torquetum has no receipt for this request. You can retry the same request.",
         "REQUEST_ID_CONFLICT" => "There is already a different request with this ID. Check its result before sending again.",
         _ when serverMessage is { Length: > 0 and <= 1024 } && !string.IsNullOrWhiteSpace(serverMessage) => serverMessage,
         "PROJECT_BUSY" => "The Torquetum project is busy. Try again when it is ready.",
         "READ_ONLY" => "This project currently accepts only read access.",
         "PROJECT_SYNC_PENDING" => "Wait for the Torquetum project to finish synchronizing.",
-        "STEP_UNSUPPORTED" => "The paired project does not offer precise STEP exchange.",
-        "GEOMETRY_NAMES_UNSUPPORTED" => "Update Torquetum to send Geometry Names to this project.",
-        "PRECONDITION_REQUIRED" => "Refresh the Asterism input reference before sending.",
+        "PRECONDITION_REQUIRED" => "The Asterism input has no current version. Check its ID and try Send again.",
         "CONTENT_TOO_LARGE" => "The collection exceeds the Torquetum transfer limit.",
         _ => "Torquetum rejected the request.",
     };
@@ -188,11 +185,9 @@ internal static partial class AlidadeClient
         public required Guid InstanceId { get; init; }
         public required string ProjectName { get; init; }
         public required int ApiVersion { get; init; }
-        public required int[] CollectionVersions { get; init; }
+        public required int CollectionVersion { get; init; }
         public required bool CanRead { get; init; }
         public required bool CanWrite { get; init; }
-        public bool GeometryNames { get; init; }
-        public string[]? Kinds { get; init; }
         public ProjectLimits? Limits { get; init; }
         public string? AvailabilityReason { get; init; }
 
@@ -200,15 +195,13 @@ internal static partial class AlidadeClient
         {
             if (string.IsNullOrWhiteSpace(ProjectId) || InstanceId == Guid.Empty ||
                 string.IsNullOrWhiteSpace(ProjectName) || ApiVersion != AlidadeClient.ApiVersion ||
-                CollectionVersions == null || !Array.Exists(CollectionVersions, version => version == 1) ||
+                CollectionVersion != GeometryCollection.Version ||
                 (CanWrite && !CanRead))
                 throw new JsonException();
-            var step = Array.Exists(CollectionVersions, version => version == 2)
-                && Kinds != null && Array.Exists(Kinds, kind => kind == "brep-step");
-            var bytes = Limits?.MaxBodyBytes is > 0 and var advertised
-                ? Math.Min(advertised, GeometryCollection.MaxExchangeBytes)
-                : step ? GeometryCollection.MaxExchangeBytes : 8 * 1024 * 1024;
-            return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason, step, GeometryNames, bytes);
+            if (Limits?.MaxBodyBytes is not (> 0 and var advertised))
+                throw new JsonException();
+            return new ProjectStatus(ProjectId, InstanceId, ProjectName, CanRead, CanWrite, AvailabilityReason,
+                Math.Min(advertised, GeometryCollection.MaxExchangeBytes));
         }
     }
 
