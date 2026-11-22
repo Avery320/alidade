@@ -10,6 +10,7 @@ Alidade is a Grasshopper plugin for exchanging geometry and data trees with Torq
 .
 ├── README.md                                # 建置、安裝和元件使用說明
 ├── LICENSE                                  # MIT 授權
+├── tor-api/                                 # Torquetum API submodule，提供共用 Schema 和樣本
 ├── src/
 │   └── Alidade/
 │       ├── Alidade.csproj                   # 外掛組件與 SDK 參考設定
@@ -23,7 +24,7 @@ Alidade is a Grasshopper plugin for exchanging geometry and data trees with Torq
 │       ├── AlidadeClient.Geometry.cs        # 幾何收發、修訂比對和回執
 │       ├── ProjectSession.cs                # 文件層級連線和 Project 型別
 │       ├── AlidadeCollection.cs             # Grasshopper Collection 型別與持久化
-│       ├── GeometryCollection.cs            # 幾何資料樹的格式驗證
+│       ├── GeometryCollection.cs            # 共用 Schema 的欄位規則與幾何驗證
 │       ├── GeometryCollectionConverter.cs   # Rhino 幾何、資料樹和長度單位換算
 │       ├── RhinoStepGeometry.cs             # Rhino STEP 資料的讀寫與檔頭處理
 │       ├── ComponentIcons.cs                # 元件圖示載入
@@ -51,10 +52,12 @@ Alidade is a Grasshopper plugin for exchanging geometry and data trees with Torq
 使用能建置 `net7.0` 的 .NET SDK。專案建置時透過 NuGet 取得固定版本的 Rhino 8.6 SDK，執行時由 Rhino 提供 Grasshopper 與 RhinoCommon。執行外掛需要 Rhino 8 的 .NET Core 模式。
 
 ```sh
-git clone https://github.com/Avery320/alidade.git
+git clone --recurse-submodules https://github.com/Avery320/alidade.git
 cd alidade
 dotnet build src/Alidade/Alidade.csproj --configuration Release
 ```
+
+已有 checkout 時，先執行 `git submodule update --init`。建置會把固定版本的幾何 Schema 嵌入 `Alidade.gha`，供離線欄位驗證使用。
 
 將 `src/Alidade/bin/Release/net7.0/Alidade.gha` 放到 Grasshopper 的第三方元件目錄，或執行 Rhino 的 `GrasshopperDeveloperSettings` 加入建置目錄。重啟 Rhino 並開啟 Grasshopper 後，就能從 **Alidade** 分頁加入元件。[McNeel 的 Grasshopper 元件目錄說明](https://developer.rhino3d.com/api/gh1/type/grasshopper.kernel.gh-pluginfoldertype/)
 
@@ -72,14 +75,13 @@ Build 與 Unpack 可離線操作。省略單位腳位時，依 Grasshopper 定�
 
 ## 本機驗收
 
-從公開的 Torquetum API repo 取得 V0.0 HTTP 契約、Schema 和驗收樣本。下方假設 `torquetum-api` 與 `alidade` 相鄰，並使用 macOS 上 Rhino 8 隨附的 .NET 執行檔。若已初始化 Torquetum 的 `tor-api/` submodule，也可用 `../torquetum/tor-api/fixtures`。 [Torquetum API](https://github.com/Avery320/torquetum-api)
+下方使用 `tor-api/` submodule 中的 V0.0 樣本，以及 macOS 上 Rhino 8 隨附的 .NET 執行檔。 [Torquetum API](https://github.com/Avery320/torquetum-api)
 
 ```sh
 dotnet build tests/Alidade.Checks/Alidade.Checks.csproj -c Release --warnaserror
 alidade_rhino_resources="/Applications/Rhino 8.app/Contents/Frameworks/RhCore.framework/Versions/A/Resources"
-tor_api_fixtures="../torquetum-api/fixtures"
 "$alidade_rhino_resources/dotnet/$(uname -m)/dotnet" tests/Alidade.Checks/bin/Release/net7.0/Alidade.Checks.dll \
-  src/Alidade/bin/Release/net7.0/Alidade.gha "$tor_api_fixtures/geometry-collection-basic.json"
+  src/Alidade/bin/Release/net7.0/Alidade.gha tor-api/fixtures/geometry-collection-basic.json
 ```
 
 驗收程式會從同目錄讀取 `geometry-collection.json`，檢查 V0.0 格式、Grasshopper SDK 的資料樹、單位往返及 STEP 檔頭。需要驗收 HTTP 時，先將 ID 皆為 `fixture` 的 Geometry Input 與 Geometry Output 直接相連，再於執行指令最後加上 `--exchange`，從標準輸入貼上獨立 Project 的配對碼並按 Enter。這個檢查涵蓋配對、寫入回執、同 ID 更新為 1493 mm 後讀回，以及混合 STEP 形狀的交換。Grasshopper 畫布操作和原生 Rhino STEP 檔案轉換可在 Rhino 視窗中驗收。

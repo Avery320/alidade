@@ -34,16 +34,22 @@ internal static class AlidadeChecks
 
     static void CheckGeometry(string basic, string cad)
     {
+        var collection = Parse(basic);
+        Check(collection.BranchCount == 3 && collection.SlotCount == 7 && collection.GeometryCount == 6,
+            "shared mixed-geometry fixture");
         var tree = JsonNode.Parse(basic)!;
         tree["schemaVersion"] = 2;
-        try
-        {
-            Parse(tree.ToJsonString());
-            throw new InvalidOperationException("The retired geometry schema was accepted.");
-        }
-        catch (CollectionFormatException error) when (error.Diagnostic.Field == "schemaVersion") { }
-
+        Reject(tree, "schemaVersion");
         tree["schemaVersion"] = "0.0";
+
+        var branch = tree["branches"]![2]!["items"]!;
+        var frame = branch[2]!["plane"]!.AsObject();
+        frame["extra"] = true;
+        Reject(tree, "extra");
+        frame.Remove("extra");
+        branch[1]!.AsObject().Remove("normal");
+        Reject(tree, "normal");
+
         tree["branches"]![2]!["items"] = new JsonArray();
         tree["branches"]![0]!["items"]![2]!.AsObject().Remove("domain");
         var diagnostics = new List<CollectionDiagnostic>();
@@ -56,12 +62,23 @@ internal static class AlidadeChecks
             && roundTrip.Payload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 1,
             "centimetres to metres");
 
+        var cadTree = JsonNode.Parse(cad)!;
+        var stepItem = cadTree["branches"]![0]!["items"]![0]!;
+        stepItem["shapeType"] = "mesh";
+        Reject(cadTree, "shapeType");
         var step = Parse(cad).Payload.GetProperty("branches")[0].GetProperty("items")[0].GetProperty("step").GetString()!;
         var sanitized = StepText.SanitizeExport(step.Replace("Open CASCADE Shape Model", "/private/source.stp"));
         Check(!sanitized.Contains("/private/source.stp", StringComparison.Ordinal)
             && sanitized[sanitized.IndexOf("DATA;", StringComparison.Ordinal)..] ==
                step[step.IndexOf("DATA;", StringComparison.Ordinal)..], "STEP export keeps geometry and strips private metadata");
         Console.WriteLine("PASS V0.0 collection, Rhino unit conversion, Grasshopper tree structure and STEP sanitization.");
+
+        static void Reject(JsonNode tree, string field)
+        {
+            try { Parse(tree.ToJsonString()); }
+            catch (CollectionFormatException error) when (error.Diagnostic.Field == field) { return; }
+            throw new InvalidOperationException($"The collection with invalid {field} was accepted.");
+        }
     }
 
     static async Task CheckExchange(GeometryCollection basic, JsonNode cad, string invite)

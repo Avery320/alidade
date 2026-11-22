@@ -28,11 +28,19 @@ internal sealed class CollectionFormatException : FormatException
 /// <summary>An immutable geometry tree in Project coordinates and metres.</summary>
 public sealed class GeometryCollection
 {
-    private const string SchemaVersion = "0.0";
     internal const int MaxExchangeBytes = 32 * 1024 * 1024;
     private const double MinimumPlaneAxis = 1e-9;
-    private static readonly string[] ItemFields = { "kind" };
-    private static readonly string[] CurveFields = { "kind", "domain" };
+    private static readonly JsonElement Contract = ReadContract();
+    private static readonly JsonElement CollectionProperties = Contract.GetProperty("properties");
+    private static readonly JsonElement Definitions = Contract.GetProperty("$defs");
+    private static readonly string SchemaVersion = CollectionProperties.GetProperty("schemaVersion").GetProperty("const").GetString()!;
+    private static readonly ObjectFields CollectionFields = ObjectFields.Read(Contract);
+    private static readonly ObjectFields BranchFields = ObjectFields.Read(CollectionProperties.GetProperty("branches").GetProperty("items"));
+    private static readonly ObjectFields PlaneFields = ObjectFields.Read(Definitions.GetProperty("planeFrame"));
+    private static readonly Dictionary<string, ObjectFields> GeometryFields = Definitions.GetProperty("geometry")
+        .GetProperty("oneOf").EnumerateArray().ToDictionary(
+            shape => shape.GetProperty("properties").GetProperty("kind").GetProperty("const").GetString()!,
+            ObjectFields.Read, StringComparer.Ordinal);
 
     private GeometryCollection(JsonElement payload, int branchCount, int count, int geometryCount)
     {
@@ -51,13 +59,7 @@ public sealed class GeometryCollection
 
     internal static GeometryCollection FromOwnedPayload(JsonElement payload)
     {
-        Fields(payload, new[] { "schemaVersion", "units", "space", "branches" });
-        var version = payload.GetProperty("schemaVersion");
-        if (version.ValueKind != JsonValueKind.String || version.GetString() != SchemaVersion)
-            throw Invalid($"Expected Tor API geometry collection version {SchemaVersion}.", "schemaVersion");
-        if (Text(payload.GetProperty("units"), "units") != "m"
-            || Text(payload.GetProperty("space"), "space") != "project")
-            throw Invalid("Expected a supported collection in Project metres.");
+        CollectionFields.Check(payload);
 
         var source = payload.GetProperty("branches");
         var entries = Elements(source, "branches");
@@ -68,7 +70,7 @@ public sealed class GeometryCollection
         var geometryCount = 0;
         foreach (var branch in entries)
         {
-            Fields(branch, new[] { "path", "items" });
+            BranchFields.Check(branch);
             var path = Elements(branch.GetProperty("path"), "path", 1).Select(value => Integer(value, "path")).ToArray();
             var order = previousPath.AsSpan().SequenceCompareTo(path);
             if (order == 0)
@@ -118,49 +120,42 @@ public sealed class GeometryCollection
         if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("kind", out var value))
             throw Invalid("Expected a geometry object with a kind.", "kind");
         var kind = Text(value, "kind");
-        void ShapeFields(params string[] fields) => Fields(item, fields, kind is "line" or "polyline" ? CurveFields : ItemFields);
+        if (!GeometryFields.TryGetValue(kind, out var fields))
+            throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind is unsupported.", "kind");
+        fields.Check(item);
         switch (kind)
         {
             case "point":
-                ShapeFields("position");
                 Coordinates(item.GetProperty("position"), "position");
                 break;
             case "line":
-                ShapeFields("start", "end");
                 if (Coordinates(item.GetProperty("start"), "start") == Coordinates(item.GetProperty("end"), "end"))
                     throw Invalid("A line's endpoints must differ.", "end");
                 CheckDomain(item);
                 break;
             case "polyline":
-                ShapeFields("points", "closed");
                 CheckPolyline(item);
                 CheckDomain(item);
                 break;
             case "plane":
-                ShapeFields("origin", "normal", "direction");
                 CheckPlane(item);
                 break;
             case "box":
-                ShapeFields("plane", "x", "y", "z");
                 var plane = item.GetProperty("plane");
-                Fields(plane, new[] { "origin", "normal", "direction" });
+                PlaneFields.Check(plane);
                 CheckPlane(plane);
                 foreach (var axis in new[] { "x", "y", "z" })
                     Interval(item.GetProperty(axis), axis);
                 break;
             case "triangle-mesh":
-                ShapeFields("positions", "triangles");
                 CheckMesh(item);
                 break;
             case "brep-step":
-                ShapeFields("shapeType", "step");
-                if (Text(item.GetProperty("shapeType"), "shapeType") is not ("face" or "shell" or "solid"))
-                    throw Invalid("Declare a STEP face, shell or solid.", "shapeType");
                 if (!StepText.IsPart21(Text(item.GetProperty("step"), "step")))
                     throw CollectionFormatException.At("INVALID_STEP", "Expected a bounded STEP Part 21 document.", "step");
                 break;
             default:
-                throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind is unsupported.", "kind");
+                throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind has no Alidade converter.", "kind");
         }
     }
 
@@ -290,20 +285,58 @@ public sealed class GeometryCollection
             ? value.GetString()!
             : throw Invalid("Expected a string.", field);
 
-    private static void Fields(JsonElement value, string[] required, params string[] optional)
+    private static JsonElement ReadContract()
     {
-        if (value.ValueKind != JsonValueKind.Object)
-            throw Invalid("Expected an object.");
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var property in value.EnumerateObject())
+        using var resource = typeof(GeometryCollection).Assembly
+            .GetManifestResourceStream("Torquetum.Alidade.geometry-collection.schema.json")
+            ?? throw new InvalidOperationException("The Tor API geometry collection schema is missing.");
+        return JsonSerializer.Deserialize<JsonElement>(resource);
+    }
+
+    // Project the contract's object fields once. The geometry checks handle tuple contents in one pass.
+    private sealed record ObjectFields(string[] Required, Dictionary<string, string[]?> Allowed)
+    {
+        internal static ObjectFields Read(JsonElement definition)
         {
-            if ((!required.Contains(property.Name) && !optional.Contains(property.Name)) || !seen.Add(property.Name))
-                throw Invalid("Unexpected or repeated property.", property.Name);
+            var sources = definition.TryGetProperty("$ref", out var reference)
+                ? new[] { definition, Definitions.GetProperty(reference.GetString()!["#/$defs/".Length..]) }
+                : new[] { definition };
+            var required = sources.SelectMany(source => source.TryGetProperty("required", out var names)
+                ? Strings(names) : Array.Empty<string>()).ToArray();
+            // Selecting a geometry definition already validates the kind value.
+            var allowed = sources.SelectMany(source => source.GetProperty("properties").EnumerateObject())
+                .ToDictionary(property => property.Name,
+                    property => property.Name == "kind" ? null : AllowedValues(property.Value), StringComparer.Ordinal);
+            return new(required, allowed);
         }
-        foreach (var name in required)
+
+        private static string[] Strings(JsonElement values) =>
+            values.EnumerateArray().Select(value => value.GetString()!).ToArray();
+
+        private static string[]? AllowedValues(JsonElement definition)
         {
-            if (!seen.Contains(name))
-                throw Invalid("Missing required property.", name);
+            if (definition.TryGetProperty("const", out var literal))
+                return new[] { literal.GetString()! };
+            return definition.TryGetProperty("enum", out var values) ? Strings(values) : null;
+        }
+
+        internal void Check(JsonElement value)
+        {
+            if (value.ValueKind != JsonValueKind.Object)
+                throw Invalid("Expected an object.");
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in value.EnumerateObject())
+            {
+                var name = property.Name;
+                if (!Allowed.TryGetValue(name, out var choices) || !seen.Add(name))
+                    throw Invalid("Unexpected or repeated property.", name);
+                if (choices != null && (property.Value.ValueKind != JsonValueKind.String ||
+                    !choices.Contains(property.Value.GetString(), StringComparer.Ordinal)))
+                    throw Invalid($"Expected {string.Join(" or ", choices)}.", name);
+            }
+            foreach (var name in Required)
+                if (!seen.Contains(name))
+                    throw Invalid("Missing required property.", name);
         }
     }
 

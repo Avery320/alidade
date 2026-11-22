@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Icons/*.png" LogicalName="$(RootNamespace).Icons.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../../tor-api/contracts/geometry-collection.schema.json"
+                      LogicalName="$(RootNamespace).geometry-collection.schema.json" />
   </ItemGroup>
 
   <ItemGroup>

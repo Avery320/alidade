@@ -1,0 +1,3 @@
+[submodule "tor-api"]
+	path = tor-api
+	url = https://github.com/Avery320/torquetum-api.git
