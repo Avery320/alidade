@@ -2,6 +2,7 @@ using System;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
+using System.Threading.Tasks;
 using GH_IO.Serialization;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
@@ -15,42 +16,83 @@ internal sealed record ProjectStatus(
     internal bool Matches(string projectId, Guid instanceId) => ProjectId == projectId && InstanceId == instanceId;
 }
 
+internal sealed record ProjectAccess(Uri Endpoint, ProjectStatus Status, string Token, DateTimeOffset ExpiresAt, string? Locator)
+{
+    internal HttpRequestMessage Request(HttpMethod method, string path)
+    {
+        var request = new HttpRequestMessage(method, new Uri(Endpoint, path));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+        return request;
+    }
+}
+
 public sealed class ProjectSession
 {
-    private readonly Uri _endpoint;
     private readonly ulong _documentId;
-    private readonly DateTimeOffset _expiresAt;
-    private volatile string? _accessToken;
+    private readonly RememberedConnection? _remembered;
+    private readonly SemaphoreSlim _renewal = new(1);
+    private ProjectAccess? _access;
+    private ProjectStatus _status;
 
-    internal ProjectSession(Uri endpoint, ulong documentId, ProjectStatus status, string accessToken, DateTimeOffset expiresAt)
+    internal ProjectSession(ulong documentId, ProjectAccess access, RememberedConnection? remembered = null)
     {
-        _endpoint = endpoint;
         _documentId = documentId;
-        _expiresAt = expiresAt;
-        _accessToken = accessToken;
-        Status = status;
+        _access = access;
+        _remembered = remembered;
+        _status = access.Status;
     }
 
-    internal ProjectStatus Status { get; set; }
+    internal ProjectStatus Status
+    {
+        get => Volatile.Read(ref _status);
+        set
+        {
+            if (Volatile.Read(ref _access)?.Status.Matches(value.ProjectId, value.InstanceId) == true)
+                Volatile.Write(ref _status, value);
+        }
+    }
     internal event Action? Disconnected;
 
-    internal bool IsValid => _accessToken != null && DateTimeOffset.UtcNow < _expiresAt;
+    internal bool IsValid => Volatile.Read(ref _access) is { } access
+        && (_remembered != null || DateTimeOffset.UtcNow < access.ExpiresAt);
 
     internal bool IsValidFor(ulong documentId) => IsValid && documentId == _documentId;
 
     internal void Disconnect()
     {
-        if (Interlocked.Exchange(ref _accessToken, null) != null)
+        if (Interlocked.Exchange(ref _access, null) != null)
             Disconnected?.Invoke();
     }
 
-    internal HttpRequestMessage Request(ulong documentId, HttpMethod method, string path)
+    internal async Task<ProjectAccess> AccessAsync(ulong documentId, CancellationToken cancellation)
     {
-        if (!IsValidFor(documentId) || _accessToken is not { } token)
+        if (documentId != _documentId)
             throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
-        var request = new HttpRequestMessage(method, new Uri(_endpoint, path));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return request;
+
+        await _renewal.WaitAsync(cancellation).ConfigureAwait(false);
+        try
+        {
+            var access = Volatile.Read(ref _access)
+                ?? throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+            if (_remembered == null)
+            {
+                if (DateTimeOffset.UtcNow >= access.ExpiresAt)
+                    throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+                return access;
+            }
+
+            var target = _remembered.Locate(access.Status.InstanceId);
+            if (target.InstanceId == access.Status.InstanceId && target.Endpoint == access.Endpoint
+                && DateTimeOffset.UtcNow < access.ExpiresAt)
+                return access;
+
+            var next = await AlidadeClient.ResumeAccessAsync(_remembered, target, cancellation).ConfigureAwait(false);
+            if (!ReferenceEquals(Interlocked.CompareExchange(ref _access, next, access), access))
+                throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+            Status = next.Status;
+            return next;
+        }
+        finally { _renewal.Release(); }
     }
 }
 

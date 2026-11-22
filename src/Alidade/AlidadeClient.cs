@@ -2,7 +2,10 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,21 +31,60 @@ internal static partial class AlidadeClient
 
     public static async Task<ProjectSession> PairAsync(string code, ulong documentId, CancellationToken cancellation)
     {
+        var invitation = ReadInvitation(code);
+        var access = await RequestAccessAsync(invitation.Endpoint, invitation.InstanceId, invitation.Invite, null, cancellation)
+            .ConfigureAwait(false);
+        return new ProjectSession(documentId, access);
+    }
+
+    internal static async Task<ProjectSession?> ConnectAsync(string? code, Guid connector, ulong documentId, CancellationToken cancellation)
+    {
+        var saved = RememberedConnection.Load(connector);
+        if (saved != null && saved.Matches(code))
+        {
+            var renewed = await ResumeAccessAsync(saved, saved.Locate(), cancellation).ConfigureAwait(false);
+            return new ProjectSession(documentId, renewed, saved);
+        }
+        if (string.IsNullOrWhiteSpace(code)) return null;
+
+        var invitation = ReadInvitation(code);
+        var secret = RandomNumberGenerator.GetBytes(32);
+        var access = await RequestAccessAsync(invitation.Endpoint, invitation.InstanceId, invitation.Invite,
+            RememberedConnection.Hash(secret), cancellation).ConfigureAwait(false);
+        var locator = access.Locator ?? throw new AlidadeConnectionException("Torquetum did not remember this connection.");
+        var remembered = new RememberedConnection(access.Status.ProjectId, locator, EncodeBase64Url(secret),
+            RememberedConnection.Hash(Encoding.UTF8.GetBytes(code)));
+        cancellation.ThrowIfCancellationRequested();
+        remembered.Save(connector);
+        return new ProjectSession(documentId, access, remembered);
+    }
+
+    internal static async Task<ProjectAccess> ResumeAccessAsync(RememberedConnection saved,
+        (Uri Endpoint, Guid InstanceId) target, CancellationToken cancellation)
+    {
+        var bytes = new byte[48];
+        Convert.FromHexString(target.InstanceId.ToString("N")).CopyTo(bytes, 0);
+        DecodeBase64Url(saved.Secret).CopyTo(bytes, 16);
+        var access = await RequestAccessAsync(target.Endpoint, target.InstanceId, EncodeBase64Url(bytes), null, cancellation)
+            .ConfigureAwait(false);
+        if (access.Status.ProjectId != saved.ProjectId || access.Locator != saved.Locator)
+            throw new AlidadeConnectionException("The Torquetum Project changed. Pair again.", pairingRequired: true);
+        return access;
+    }
+
+    private static async Task<ProjectAccess> RequestAccessAsync(Uri endpoint, Guid instanceId, string credential, string? remember,
+        CancellationToken cancellation)
+    {
         try
         {
-            var invitation = ReadInvitation(code);
-            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(invitation.Endpoint, ApiPrefix + "/pair"));
-            request.Content = JsonContent.Create(new
-            {
-                invite = invitation.Invite,
-                clientName = "Alidade for Grasshopper",
-            });
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint, ApiPrefix + "/pair"));
+            request.Content = JsonContent.Create(new PairRequest(credential, "Alidade for Grasshopper", remember));
             var grant = await SendAsync<Grant>(request, cancellation).ConfigureAwait(false);
-            if (grant.InstanceId != invitation.InstanceId ||
-                ReadInstanceId(grant.AccessToken) != invitation.InstanceId ||
-                grant.GrantId == Guid.Empty || grant.ExpiresAt <= DateTimeOffset.UtcNow)
+            if (grant.InstanceId != instanceId || ReadInstanceId(grant.AccessToken) != instanceId
+                || grant.GrantId == Guid.Empty || grant.ExpiresAt <= DateTimeOffset.UtcNow
+                || (grant.Locator != null && !RememberedConnection.IsLocator(grant.Locator)))
                 throw new AlidadeConnectionException("Torquetum returned an invalid pairing response.");
-            return new ProjectSession(invitation.Endpoint, documentId, grant.Status(), grant.AccessToken, grant.ExpiresAt);
+            return new ProjectAccess(endpoint, grant.Status(), grant.AccessToken, grant.ExpiresAt, grant.Locator);
         }
         catch (JsonException)
         {
@@ -54,9 +96,10 @@ internal static partial class AlidadeClient
     {
         try
         {
-            using var request = project.Request(documentId, HttpMethod.Get, ApiPrefix + "/project");
+            var access = await project.AccessAsync(documentId, cancellation).ConfigureAwait(false);
+            using var request = access.Request(HttpMethod.Get, ApiPrefix + "/project");
             var status = (await SendAsync<ProjectResponse>(request, cancellation).ConfigureAwait(false)).Status();
-            if (!project.Status.Matches(status.ProjectId, status.InstanceId))
+            if (!access.Status.Matches(status.ProjectId, status.InstanceId))
                 throw new AlidadeConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
             return status;
         }
@@ -145,18 +188,22 @@ internal static partial class AlidadeClient
 
     private static Guid? ReadInstanceId(string? credential)
     {
-        if (credential is not { Length: 80 } || credential[36] != '.' ||
-            !Guid.TryParseExact(credential.AsSpan(0, 36), "D", out var instance) || instance == Guid.Empty)
+        if (credential is not { Length: 64 })
             return null;
         try
         {
-            return DecodeBase64Url(credential[37..]).Length == 32 ? instance : null;
+            var bytes = DecodeBase64Url(credential);
+            var instance = Guid.ParseExact(Convert.ToHexString(bytes.AsSpan(0, 16)), "N");
+            return instance == Guid.Empty ? null : instance;
         }
         catch (FormatException)
         {
             return null;
         }
     }
+
+    private static string EncodeBase64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private static byte[] DecodeBase64Url(string value)
     {
@@ -172,6 +219,9 @@ internal static partial class AlidadeClient
         public required string Endpoint { get; init; }
         public required string Invite { get; init; }
     }
+
+    private sealed record PairRequest(string Credential, string ClientName,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Remember);
 
     private class ProjectResponse
     {
@@ -205,6 +255,7 @@ internal static partial class AlidadeClient
         public required Guid GrantId { get; init; }
         public required string AccessToken { get; init; }
         public required DateTimeOffset ExpiresAt { get; init; }
+        public string? Locator { get; init; }
     }
 
     private sealed class ApiError

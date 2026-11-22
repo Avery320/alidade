@@ -9,6 +9,7 @@ namespace Torquetum.Alidade;
 public sealed class ConnectToTorquetum : AlidadeAsyncComponent
 {
     private string? _attemptedCode;
+    private bool _attempted;
     private ProjectSession? _session;
 
     public ConnectToTorquetum()
@@ -20,7 +21,7 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
         manager.AddTextParameter("Pairing Code", "Pairing Code",
-            "Paste a one-time pairing code from Torquetum Project Settings.", GH_ParamAccess.item);
+            "Paste a one-time pairing code to authorize this connector.", GH_ParamAccess.item);
         manager.AddBooleanParameter("Connect", "Connect",
             "Set to True to connect or False to disconnect.", GH_ParamAccess.item, false);
         manager[0].Optional = manager[1].Optional = true;
@@ -44,16 +45,19 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
         }
 
         var code = SingleInput<string>(data, 0)?.Trim();
-        if (!string.IsNullOrEmpty(code) && code != _attemptedCode)
+        if (!_attempted || (!string.IsNullOrEmpty(code) && code != _attemptedCode))
         {
             ResetState();
+            _attempted = true;
             _attemptedCode = code;
-            StartRequest(document, null, cancellation => AlidadeClient.PairAsync(code, document.RuntimeID, cancellation),
+            var connector = InstanceGuid;
+            var documentId = document.RuntimeID;
+            StartRequest(document, null, cancellation => AlidadeClient.ConnectAsync(code, connector, documentId, cancellation),
                 session =>
                 {
                     _session = session;
-                    session.Disconnected += RefreshConnectionOutput;
-                }, abandon: session => session.Disconnect());
+                    if (session != null) session.Disconnected += RefreshConnectionOutput;
+                }, abandon: session => session?.Disconnect());
         }
 
         if (IsPending || Failure != null || _session is not { } connected || !connected.IsValidFor(document.RuntimeID))
@@ -92,6 +96,7 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
     protected override void ResetState()
     {
         _attemptedCode = null;
+        _attempted = false;
         if (_session is { } session)
         {
             session.Disconnected -= RefreshConnectionOutput;

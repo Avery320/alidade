@@ -25,7 +25,8 @@ internal static partial class AlidadeClient
         if (collection.GeometryCount == 0)
             throw new AlidadeConnectionException("Connect a collection that contains geometry.");
 
-        using var discovery = project.Request(documentId, HttpMethod.Get, $"{AsterismRoute}/ports");
+        var access = await project.AccessAsync(documentId, cancellation).ConfigureAwait(false);
+        using var discovery = access.Request(HttpMethod.Get, $"{AsterismRoute}/ports");
         var listing = await SendAsync<PortDirectory>(discovery, cancellation).ConfigureAwait(false);
         var target = listing.Items?.FirstOrDefault(port => port?.Id == portId && port.Direction == "input");
         if (target == null)
@@ -34,12 +35,12 @@ internal static partial class AlidadeClient
             throw new AlidadeConnectionException(ErrorMessage("PRECONDITION_REQUIRED"));
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(collection.Payload, JsonOptions);
-        if (payload.Length > project.Status.MaxBodyBytes)
+        if (payload.Length > access.Status.MaxBodyBytes)
             throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
 
         var requestId = Guid.NewGuid();
         var receiptPath = $"{ApiPrefix}/requests/{requestId:D}";
-        using (var request = project.Request(documentId, HttpMethod.Put, route))
+        using (var request = access.Request(HttpMethod.Put, route))
         {
             request.Content = new ReadOnlyMemoryContent(payload);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
@@ -57,7 +58,7 @@ internal static partial class AlidadeClient
         {
             while (true)
             {
-                using var request = project.Request(documentId, HttpMethod.Get, receiptPath);
+                using var request = access.Request(HttpMethod.Get, receiptPath);
                 using var response = await SendForStatusAsync(request, HttpStatusCode.OK, wait.Token).ConfigureAwait(false);
                 var receipt = await ReadJsonAsync<ReceiptResponse>(response, wait.Token).ConfigureAwait(false);
                 if (receipt.RequestId != requestId) throw new JsonException();
@@ -81,7 +82,9 @@ internal static partial class AlidadeClient
     internal static async Task<GeometryCollection> ReadGeometryAsync(ProjectSession project, ulong documentId,
         string portId, CancellationToken cancellation)
     {
-        using var request = project.Request(documentId, HttpMethod.Get, PortRoute("outputs", portId));
+        var route = PortRoute("outputs", portId);
+        var access = await project.AccessAsync(documentId, cancellation).ConfigureAwait(false);
+        using var request = access.Request(HttpMethod.Get, route);
         var payload = await SendAsync<JsonElement>(request, cancellation).ConfigureAwait(false);
         return GeometryCollection.FromOwnedPayload(payload);
     }

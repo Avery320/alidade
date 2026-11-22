@@ -65,11 +65,13 @@ dotnet build src/Alidade/Alidade.csproj --configuration Release
 
 Rhino 與提供 **Tor API V0.0** 的 Torquetum Desktop 或本機 Web 須在同一台電腦執行。獨立 Project 可讀寫，LAN 共享 Project 完成同步後可讀取。
 
-1. 在 Torquetum 的 **Project Settings → External Connections** 按 **Copy**，將單次配對碼貼到 Grasshopper Panel。把 Panel 接到 **Connect to Torquetum** 的 **Pairing Code**，將 **Connect** 切成 `True`。用 **Project** 輸出連接收發元件。
+1. 首次在 Torquetum 的 **Project Settings → External Connections** 按 **Copy**，將單次配對碼貼到 Grasshopper Panel。把 Panel 接到 **Connect to Torquetum** 的 **Pairing Code**，將 **Connect** 切成 `True`。用 **Project** 輸出連接收發元件，並儲存 Grasshopper 定義以保留同一個連線元件。
 2. **Grasshopper → Asterism。** 把 Rhino 幾何接到 **Build Geometry Collection**，再將 **Collection** 接到 **Send Geometry**。在 **Send Geometry** 和 Asterism **Geometry Input** 填入相同的 **ID**。用 Grasshopper Button 觸發 **Send**，顯示 **Sent** 後，在 **Geometry Input** 按 **Read** 更新接線下游。
 3. **Asterism → Grasshopper。** 將幾何接到 **Geometry Output**，並在 **Geometry Output** 與 **Read Geometry** 填入相同的 **ID**。在 Asterism 按 **Send**，再用 Grasshopper Button 觸發 **Read**。把讀回的 **Collection** 接到 **Unpack Geometry Collection** 還原成 Rhino 幾何。
 
 要驗收往返，可將 **Geometry Input** 接到 **Geometry Output**。在 Asterism 要把幾何存入 Station 時，使用 **Bake**。
+
+Alidade 在目前電腦上記住這個元件的授權。重新開啟同一個 Torquetum Project 和 Grasshopper 定義後，**Connect** 開啟時會恢復連線。若 Grasshopper 先開啟，在 Torquetum 開好專案後重開 **Connect** 即可。重連密鑰存於目前使用者的本機資料，Grasshopper 定義保存用來識別連線的元件 ID。要撤銷時，在 Torquetum 的 **External Connections** 按該授權的 **Revoke**。
 
 Build 與 Unpack 可離線操作。省略單位腳位時，依 Grasshopper 定義所關聯的 Rhino 文件模型單位換算。資料樹可混合點、線、折線、平面、盒、三角網格，以及可表示為 STEP 的單一連通面、殼或實體。交換會保留分支路徑、分支內順序、空分支和 null 槽。
 
