@@ -44,8 +44,8 @@ Alidade is a Grasshopper plugin for exchanging geometry and data trees with Torq
 | Session | [Connect to Torquetum](src/Alidade/ConnectToTorquetum.cs) | Pairing Code、Connect | Project、Status | 以單次配對碼建立目前 Grasshopper 文件的連線。 |
 | Convert | [Build Geometry Collection](src/Alidade/GeometryCollectionComponents.cs) | Geometry、Source Units | Collection、Diagnostics | 將 Rhino 幾何與分支轉成以公尺為單位的交換資料。 |
 | Convert | [Unpack Geometry Collection](src/Alidade/GeometryCollectionComponents.cs) | Collection、Target Units | Geometry、Diagnostics | 將交換資料轉回 Rhino 幾何，保留分支與資料位置。 |
-| Exchange | [Send Geometry](src/Alidade/SendGeometry.cs) | Project、Collection、ID、Send | Status | 送出整棵幾何樹，替換相同 ID 的 Geometry Input 資料。 |
-| Exchange | [Read Geometry](src/Alidade/ReadGeometry.cs) | Project、ID | Collection、Status | 從同一 ID 的 Asterism Geometry Output 讀取最近一次完成的結果。 |
+| Exchange | [Send Geometry](src/Alidade/SendGeometry.cs) | Project、Collection、ID、Send | Status | 按 Send 將一棵幾何樹送到相同 ID，供 Asterism 讀取。 |
+| Exchange | [Read Geometry](src/Alidade/ReadGeometry.cs) | Project、ID、Read | Collection、Status | 按 Read 取得對應 Asterism Geometry Output 最近一次送出的結果。 |
 
 ## 建置與安裝
 
@@ -66,12 +66,14 @@ dotnet build src/Alidade/Alidade.csproj --configuration Release
 Rhino 與提供 **Tor API V0.0** 的 Torquetum Desktop 或本機 Web 須在同一台電腦執行。獨立 Project 可讀寫，LAN 共享 Project 完成同步後可讀取。
 
 1. 在 Torquetum 的 **Project Settings → External Connections** 按 **Copy**，將單次配對碼貼到 Grasshopper Panel。把 Panel 接到 **Connect to Torquetum** 的 **Pairing Code**，將 **Connect** 切成 `True`。用 **Project** 輸出連接收發元件。
-2. 開啟 Torquetum Studio。在 Asterism 放置 **Geometry Input**，將 **ID** 設為 `fixture`。把 Rhino 幾何接到 **Build Geometry Collection**，再把 **Collection** 接到 **Send Geometry**，將 **ID** 設成同樣的 `fixture`。用 Grasshopper Button 對 **Send** 發出一次觸發，也可在元件右鍵選 **Send**。
-3. 把 **Geometry Input** 接到 **Geometry Output**，將 Output 的 **ID** 也設為 `fixture`。在 **Read Geometry** 填入相同 ID 並右鍵選 **Read**，再接 **Unpack Geometry Collection**。要將幾何存入 Station，可在 Asterism 執行 **Bake**。
+2. **Grasshopper → Asterism。** 把 Rhino 幾何接到 **Build Geometry Collection**，再將 **Collection** 接到 **Send Geometry**。在 **Send Geometry** 和 Asterism **Geometry Input** 填入相同的 **ID**。用 Grasshopper Button 觸發 **Send**，顯示 **Sent** 後，在 **Geometry Input** 按 **Read** 更新接線下游。
+3. **Asterism → Grasshopper。** 將幾何接到 **Geometry Output**，並在 **Geometry Output** 與 **Read Geometry** 填入相同的 **ID**。在 Asterism 按 **Send**，再用 Grasshopper Button 觸發 **Read**。把讀回的 **Collection** 接到 **Unpack Geometry Collection** 還原成 Rhino 幾何。
+
+要驗收往返，可將 **Geometry Input** 接到 **Geometry Output**。在 Asterism 要把幾何存入 Station 時，使用 **Bake**。
 
 Build 與 Unpack 可離線操作。省略單位腳位時，依 Grasshopper 定義所關聯的 Rhino 文件模型單位換算。資料樹可混合點、線、折線、平面、盒、三角網格，以及可表示為 STEP 的單一連通面、殼或實體。交換會保留分支路徑、分支內順序、空分支和 null 槽。
 
-送出待確認時可用 **Check result** 查回執，或用 **Retry same request** 重送同一筆。**Connect** 切成 `False` 會取消本地等待並清除連線，Torquetum 已受理的寫入仍可完成。再次配對時使用新碼。
+兩個方向都以 ID 保留最近一次送出的一份資料。改動上游幾何後，依序按 **Send → Read** 更新接收端。**Connect** 切成 `False` 會取消本地等待並清除連線，Torquetum 已受理的寫入仍可完成。
 
 ## 本機驗收
 
@@ -84,7 +86,7 @@ alidade_rhino_resources="/Applications/Rhino 8.app/Contents/Frameworks/RhCore.fr
   src/Alidade/bin/Release/net7.0/Alidade.gha tor-api/fixtures/geometry-collection-basic.json
 ```
 
-驗收程式會從同目錄讀取 `geometry-collection.json`，檢查 V0.0 格式、Grasshopper SDK 的資料樹、單位往返及 STEP 檔頭。需要驗收 HTTP 時，先將 ID 皆為 `fixture` 的 Geometry Input 與 Geometry Output 直接相連，再於執行指令最後加上 `--exchange`，從標準輸入貼上獨立 Project 的配對碼並按 Enter。這個檢查涵蓋配對、寫入回執、同 ID 更新為 1493 mm 後讀回，以及混合 STEP 形狀的交換。Grasshopper 畫布操作和原生 Rhino STEP 檔案轉換可在 Rhino 視窗中驗收。
+驗收程式會從同目錄讀取 `geometry-collection.json`，檢查 V0.0 格式、資料樹、單位往返和 STEP。驗收 HTTP 時，將 ID 皆為 `fixture` 的 Geometry Input 與 Geometry Output 相連，執行指令時帶上 `--exchange` 並貼上獨立 Project 的配對碼。每次程式提示後，在 Asterism 依序按 **Read → Send**，再回到終端機按 Enter。驗收會檢查同 ID 更新為 1493 mm 與混合 STEP 形狀的讀回結果。
 
 ## 授權
 

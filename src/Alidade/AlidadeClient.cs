@@ -80,10 +80,10 @@ internal static partial class AlidadeClient
     }
 
     private static async Task<HttpResponseMessage> SendForStatusAsync(
-        HttpRequestMessage request, HttpStatusCode expected, CancellationToken cancellation, int timeoutSeconds = 15)
+        HttpRequestMessage request, HttpStatusCode expected, CancellationToken cancellation)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        deadline.CancelAfter(TimeSpan.FromSeconds(15));
         var response = await Http.SendAsync(request, deadline.Token).ConfigureAwait(false);
         if (response.StatusCode == expected)
             return response;
@@ -93,22 +93,20 @@ internal static partial class AlidadeClient
             ApiError? error;
             try { error = await ReadJsonAsync<ApiError>(response, cancellation).ConfigureAwait(false); }
             catch (JsonException) { error = null; }
-            throw ErrorException(error?.Error, response.StatusCode, RetryAfter(response));
+            throw ErrorException(error?.Error, response.StatusCode);
         }
     }
 
     private static DateTimeOffset? RetryAfter(HttpResponseMessage response) =>
         response.Headers.RetryAfter?.Delta is { } delta ? DateTimeOffset.UtcNow + delta : response.Headers.RetryAfter?.Date;
 
-    private static AlidadeConnectionException ErrorException(ErrorDetails? error, HttpStatusCode status,
-        DateTimeOffset? retryAfter = null)
+    private static AlidadeConnectionException ErrorException(ErrorDetails? error, HttpStatusCode status)
     {
         var message = ErrorMessage(error?.Code, error?.Message);
         if (error?.Path is { Length: > 0 } path)
             message += $" Branch {{{string.Join(";", path)}}}" +
                 (error.ItemIndex is { } index ? $", item {index}." : ".");
-        return new AlidadeConnectionException(message, pairingRequired: status == HttpStatusCode.Unauthorized,
-            code: error?.Code, httpStatus: status, retryAfter: retryAfter);
+        return new AlidadeConnectionException(message, pairingRequired: status == HttpStatusCode.Unauthorized);
     }
 
     internal static string ErrorMessage(string? code, string? serverMessage = null) => code switch
@@ -117,8 +115,6 @@ internal static partial class AlidadeClient
         "PAIRING_REQUIRED" => "Pair with the project again.",
         "PORT_NOT_FOUND" => "Check the ID on the matching Asterism node.",
         "STALE_REVISION" => "The Asterism input has changed. Use Send again for its current version.",
-        "REQUEST_UNKNOWN" => "Torquetum has no receipt for this request. You can retry the same request.",
-        "REQUEST_ID_CONFLICT" => "There is already a different request with this ID. Check its result before sending again.",
         _ when serverMessage is { Length: > 0 and <= 1024 } && !string.IsNullOrWhiteSpace(serverMessage) => serverMessage,
         "PROJECT_BUSY" => "The Torquetum project is busy. Try again when it is ready.",
         "READ_ONLY" => "This project currently accepts only read access.",
@@ -144,7 +140,7 @@ internal static partial class AlidadeClient
             catch (FormatException) { }
             catch (JsonException) { }
         }
-        throw new AlidadeConnectionException("Copy a complete pairing code from Torquetum Project Settings.", code: "INVITE_INVALID");
+        throw new AlidadeConnectionException("Copy a complete pairing code from Torquetum Project Settings.");
     }
 
     private static Guid? ReadInstanceId(string? credential)
@@ -227,17 +223,10 @@ internal static partial class AlidadeClient
 
 internal sealed class AlidadeConnectionException : Exception
 {
-    public AlidadeConnectionException(string message, bool pairingRequired = false, string? code = null,
-        HttpStatusCode? httpStatus = null, DateTimeOffset? retryAfter = null) : base(message)
+    public AlidadeConnectionException(string message, bool pairingRequired = false) : base(message)
     {
         PairingRequired = pairingRequired;
-        Code = code;
-        HttpStatus = httpStatus;
-        RetryAfter = retryAfter;
     }
 
     public bool PairingRequired { get; }
-    public string? Code { get; }
-    public HttpStatusCode? HttpStatus { get; }
-    public DateTimeOffset? RetryAfter { get; }
 }

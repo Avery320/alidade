@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Grasshopper.Kernel;
+using Grasshopper.Kernel.Types;
 using GH_IO.Serialization;
 using EtoApplication = Eto.Forms.Application;
 
@@ -13,6 +14,7 @@ namespace Torquetum.Alidade;
 public abstract class AlidadeAsyncComponent : GH_Component
 {
     private CancellationTokenSource? _operation;
+    private bool _triggerHigh = true;
 
     protected AlidadeAsyncComponent(string name, string nickname, string description, string category)
         : base(name, nickname, description, "Alidade", category) { }
@@ -36,6 +38,14 @@ public abstract class AlidadeAsyncComponent : GH_Component
     protected string? ExchangeId(IGH_DataAccess data, int index) =>
         SingleInput<string>(data, index)?.Trim() is { Length: > 0 } id ? id : null;
 
+    private protected bool ButtonPressed(IGH_DataAccess data, int index)
+    {
+        var trigger = Params.Input[index].SourceCount > 0 ? SingleInput<GH_Boolean>(data, index) : null;
+        var pressed = trigger?.Value == true && !_triggerHigh;
+        _triggerHigh = trigger?.Value != false;
+        return pressed;
+    }
+
     protected void ReportStatus(IGH_DataAccess data, int index, string status, string? warning)
     {
         Message = warning == status ? "" : status;
@@ -44,17 +54,17 @@ public abstract class AlidadeAsyncComponent : GH_Component
     }
 
     internal void StartRequest<T>(GH_Document document, ProjectSession? project, Func<CancellationToken, Task<T>> request,
-        Action<T> accept, Action<AlidadeConnectionException>? fail = null, Action<T>? abandon = null)
+        Action<T> accept, Action<T>? abandon = null)
     {
         CancelRequest();
         var operation = new CancellationTokenSource();
         _operation = operation;
         if (document.SolutionDepth == 0) RequestSolution(document);
-        _ = CompleteAsync(document, project, operation, request, accept, fail, abandon);
+        _ = CompleteAsync(document, project, operation, request, accept, abandon);
     }
 
     private async Task CompleteAsync<T>(GH_Document document, ProjectSession? project, CancellationTokenSource operation,
-        Func<CancellationToken, Task<T>> request, Action<T> accept, Action<AlidadeConnectionException>? fail, Action<T>? abandon)
+        Func<CancellationToken, Task<T>> request, Action<T> accept, Action<T>? abandon)
     {
         T result = default!;
         AlidadeConnectionException? error = null;
@@ -65,7 +75,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
             error = failure as AlidadeConnectionException ?? new AlidadeConnectionException(failure switch
             {
                 HttpRequestException => "Torquetum is unavailable. Check the running project and try again.",
-                OperationCanceledException => "Torquetum did not answer in time. Check the request before trying again.",
+                OperationCanceledException => "Torquetum did not answer in time.",
                 CollectionFormatException invalid => invalid.Message,
                 _ => "Torquetum returned invalid exchange data.",
             });
@@ -91,7 +101,6 @@ public abstract class AlidadeAsyncComponent : GH_Component
                 if (error.PairingRequired)
                     project?.Disconnect();
                 Failure = error;
-                fail?.Invoke(error);
             }
             RequestSolution(document);
         });
@@ -135,6 +144,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
         if (document != null)
             document.SolutionEnd -= OnSolutionEnd;
         CancelRequest();
+        _triggerHigh = true;
         ResetState();
     }
 

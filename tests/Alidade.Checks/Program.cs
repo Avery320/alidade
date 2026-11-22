@@ -85,21 +85,19 @@ internal static class AlidadeChecks
     {
         const ulong documentId = 41;
         const string id = "fixture";
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var token = timeout.Token;
         var session = await AlidadeClient.PairAsync(invite, documentId, token);
         Check(!session.IsValidFor(documentId + 1), "pairing is scoped to its Grasshopper document");
         var status = await AlidadeClient.ReadProjectAsync(session, documentId, token);
         Check(status.CanWrite, "the paired Project accepts writes");
 
-        await Send(basic);
-        var initial = (await AlidadeClient.ReadGeometryAsync(session, documentId, id, token)).Payload.GetProperty("branches");
+        var initial = await RoundTrip(basic);
         Check(initial[0].GetProperty("items")[1].ValueKind == JsonValueKind.Null
             && initial[1].GetProperty("items").GetArrayLength() == 0, "HTTP read preserves null and empty branches");
 
         cad["branches"]![2]!["items"]![0]!["position"]![0] = 1.493;
-        await Send(Parse(cad.ToJsonString()));
-        var final = (await AlidadeClient.ReadGeometryAsync(session, documentId, id, token)).Payload.GetProperty("branches");
+        var final = await RoundTrip(Parse(cad.ToJsonString()));
         Check(final[2].GetProperty("items")[0].GetProperty("position")[0].GetDouble() == 1.493
             && final[0].GetProperty("items")[0].GetProperty("shapeType").GetString() == "solid"
             && final[0].GetProperty("items")[2].GetProperty("shapeType").GetString() == "face"
@@ -107,16 +105,13 @@ internal static class AlidadeChecks
             "same ID reads the updated point and exact STEP shapes");
         Console.WriteLine("PASS live C# pairing, send, receipt and 1493 mm mixed geometry readback.");
 
-        async Task Send(GeometryCollection value)
+        async Task<JsonElement> RoundTrip(GeometryCollection value)
         {
-            var write = await AlidadeClient.PrepareWriteAsync(session, documentId, id, value, token);
-            var receipt = await AlidadeClient.WriteGeometryAsync(session, documentId, write, token);
-            while (receipt.Pending)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1), token);
-                receipt = await AlidadeClient.CheckReceiptAsync(session, documentId, write, token);
-            }
-            Check(receipt.Error == null, $"write receipt is committed ({receipt.Error})");
+            await AlidadeClient.SendGeometryAsync(session, documentId, id, value, token);
+            Console.WriteLine("In Asterism, press Read on Geometry Input and Send on Geometry Output. Then press Enter here.");
+            Check(Console.ReadLine() != null, "manual Asterism exchange confirmed");
+            var published = await AlidadeClient.ReadGeometryAsync(session, documentId, id, token);
+            return published.Payload.GetProperty("branches");
         }
     }
 

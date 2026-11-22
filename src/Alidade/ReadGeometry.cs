@@ -1,5 +1,4 @@
 using System;
-using System.Windows.Forms;
 using Grasshopper.Kernel;
 
 namespace Torquetum.Alidade;
@@ -21,7 +20,8 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
     {
         manager.AddParameter(new AlidadeProjectParameter());
         manager.AddTextParameter("ID", "ID", "Use the same ID on the Asterism Geometry Output.", GH_ParamAccess.item);
-        manager[0].Optional = manager[1].Optional = true;
+        manager.AddBooleanParameter("Read", "Read", "Connect a Grasshopper Button to read once per press.", GH_ParamAccess.item);
+        manager[0].Optional = manager[1].Optional = manager[2].Optional = true;
     }
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
@@ -32,7 +32,8 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
 
     protected override void SolveInstance(IGH_DataAccess data)
     {
-        var project = ConnectedProject(data, OnPingDocument());
+        var document = OnPingDocument();
+        var project = ConnectedProject(data, document);
         var id = ExchangeId(data, 1);
         var next = project != null && id != null ? new Input(project, id) : null;
         if (_input != next)
@@ -40,6 +41,13 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
             CancelRequest();
             _input = next;
             _result = null;
+        }
+        if (ButtonPressed(data, 2) && !IsPending && next is { } input && CanUseProject(document, input.Project))
+        {
+            var documentId = document.RuntimeID;
+            StartRequest(document, input.Project,
+                cancellation => AlidadeClient.ReadGeometryAsync(input.Project, documentId, input.Id, cancellation),
+                result => _result = result);
         }
         if (_result is { } result)
             data.SetData(0, new AlidadeCollection(result));
@@ -50,25 +58,6 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
             : _result != null ? "Received" : "Ready to read";
         var error = Failure?.Message;
         ReportStatus(data, 1, error ?? status, error);
-    }
-
-    protected override void AppendAdditionalComponentMenuItems(ToolStripDropDown menu)
-    {
-        base.AppendAdditionalComponentMenuItems(menu);
-        Menu_AppendItem(menu, "Read", (_, _) => ReadCollection(), !IsPending && CanUseProject(OnPingDocument(), _input?.Project));
-    }
-
-    private void ReadCollection()
-    {
-        var document = OnPingDocument();
-        if (IsPending || _input is not { } input || !CanUseProject(document, input.Project))
-            return;
-
-        _result = null;
-        var documentId = document.RuntimeID;
-        StartRequest(document, input.Project,
-            cancellation => AlidadeClient.ReadGeometryAsync(input.Project, documentId, input.Id, cancellation),
-            result => _result = result);
     }
 
     protected override void ResetState()
