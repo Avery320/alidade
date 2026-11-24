@@ -7,12 +7,12 @@ using Rhino;
 using Rhino.FileIO;
 using Rhino.Geometry;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
 internal static class StepText
 {
     internal static readonly UTF8Encoding Utf8 = new(false, true);
-    private const string FileName = "FILE_NAME('Alidade.stp','2000-01-01T00:00:00',(''),(''),'Alidade','Rhino','')";
+    private const string FileName = "FILE_NAME('Nuncius.stp','2000-01-01T00:00:00',(''),(''),'Nuncius','Rhino','')";
     private static readonly Regex FileNameStatement = new(
         @"(?i)\bFILE_NAME\s*\((?:'(?:''|[^'])*'|[^;'])*\)\s*;",
         RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
@@ -157,14 +157,14 @@ internal static class RhinoStepGeometry
     {
         try
         {
-            var directory = Directory.CreateTempSubdirectory("alidade-step-");
+            var directory = Directory.CreateTempSubdirectory("nunc-step-");
             try
             {
                 using var document = RhinoDoc.CreateHeadless(null)
                     ?? throw CollectionFormatException.At("STEP_UNAVAILABLE", "Rhino could not open an isolated document for STEP exchange.");
                 document.ModelUnitSystem = UnitSystem.Meters;
                 document.ModelAbsoluteTolerance = toleranceMetres;
-                return run(document, Path.Combine(directory.FullName, "Alidade.stp"));
+                return run(document, Path.Combine(directory.FullName, "Nuncius.stp"));
             }
             finally { directory.Delete(recursive: true); }
         }

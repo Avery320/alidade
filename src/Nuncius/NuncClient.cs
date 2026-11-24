@@ -9,9 +9,9 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
-internal static partial class AlidadeClient
+internal static partial class NuncClient
 {
     private const string InvitationPrefix = "TORAPI.";
     private const string ApiPrefix = "/v0.0";
@@ -51,7 +51,7 @@ internal static partial class AlidadeClient
         var secret = RandomNumberGenerator.GetBytes(32);
         var access = await RequestAccessAsync(invitation.Endpoint, invitation.InstanceId, invitation.Invite,
             RememberedConnection.Hash(secret), cancellation).ConfigureAwait(false);
-        var locator = access.Locator ?? throw new AlidadeConnectionException("Torquetum did not remember this connection.");
+        var locator = access.Locator ?? throw new NuncConnectionException("Torquetum did not remember this connection.");
         var remembered = new RememberedConnection(access.Status.ProjectId, locator, EncodeBase64Url(secret),
             RememberedConnection.Hash(Encoding.UTF8.GetBytes(code)));
         cancellation.ThrowIfCancellationRequested();
@@ -68,7 +68,7 @@ internal static partial class AlidadeClient
         var access = await RequestAccessAsync(target.Endpoint, target.InstanceId, EncodeBase64Url(bytes), null, cancellation)
             .ConfigureAwait(false);
         if (access.Status.ProjectId != saved.ProjectId || access.Locator != saved.Locator)
-            throw new AlidadeConnectionException("The Torquetum Project changed. Pair again.", pairingRequired: true);
+            throw new NuncConnectionException("The Torquetum Project changed. Pair again.", pairingRequired: true);
         return access;
     }
 
@@ -78,17 +78,17 @@ internal static partial class AlidadeClient
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint, ApiPrefix + "/pair"));
-            request.Content = JsonContent.Create(new PairRequest(credential, "Alidade for Grasshopper", remember));
+            request.Content = JsonContent.Create(new PairRequest(credential, $"{NuncAssemblyInfo.PluginName} for Grasshopper", remember));
             var grant = await SendAsync<Grant>(request, cancellation).ConfigureAwait(false);
             if (grant.InstanceId != instanceId || ReadInstanceId(grant.AccessToken) != instanceId
                 || grant.GrantId == Guid.Empty || grant.ExpiresAt <= DateTimeOffset.UtcNow
                 || (grant.Locator != null && !RememberedConnection.IsLocator(grant.Locator)))
-                throw new AlidadeConnectionException("Torquetum returned an invalid pairing response.");
+                throw new NuncConnectionException("Torquetum returned an invalid pairing response.");
             return new ProjectAccess(endpoint, grant.Status(), grant.AccessToken, grant.ExpiresAt, grant.Locator);
         }
         catch (JsonException)
         {
-            throw new AlidadeConnectionException("Torquetum returned an invalid pairing response.");
+            throw new NuncConnectionException("Torquetum returned an invalid pairing response.");
         }
     }
 
@@ -100,12 +100,12 @@ internal static partial class AlidadeClient
             using var request = access.Request(HttpMethod.Get, ApiPrefix + "/project");
             var status = (await SendAsync<ProjectResponse>(request, cancellation).ConfigureAwait(false)).Status();
             if (!access.Status.Matches(status.ProjectId, status.InstanceId))
-                throw new AlidadeConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
+                throw new NuncConnectionException("The Torquetum project changed. Pair again.", pairingRequired: true);
             return status;
         }
         catch (JsonException)
         {
-            throw new AlidadeConnectionException("Torquetum returned invalid project information.");
+            throw new NuncConnectionException("Torquetum returned invalid project information.");
         }
     }
 
@@ -143,13 +143,13 @@ internal static partial class AlidadeClient
     private static DateTimeOffset? RetryAfter(HttpResponseMessage response) =>
         response.Headers.RetryAfter?.Delta is { } delta ? DateTimeOffset.UtcNow + delta : response.Headers.RetryAfter?.Date;
 
-    private static AlidadeConnectionException ErrorException(ErrorDetails? error, HttpStatusCode status)
+    private static NuncConnectionException ErrorException(ErrorDetails? error, HttpStatusCode status)
     {
         var message = ErrorMessage(error?.Code, error?.Message);
         if (error?.Path is { Length: > 0 } path)
             message += $" Branch {{{string.Join(";", path)}}}" +
                 (error.ItemIndex is { } index ? $", item {index}." : ".");
-        return new AlidadeConnectionException(message, pairingRequired: status == HttpStatusCode.Unauthorized);
+        return new NuncConnectionException(message, pairingRequired: status == HttpStatusCode.Unauthorized);
     }
 
     internal static string ErrorMessage(string? code, string? serverMessage = null) => code switch
@@ -183,7 +183,7 @@ internal static partial class AlidadeClient
             catch (FormatException) { }
             catch (JsonException) { }
         }
-        throw new AlidadeConnectionException("Copy a complete pairing code from Torquetum Project Settings.");
+        throw new NuncConnectionException("Copy a complete pairing code from Torquetum Project Settings.");
     }
 
     private static Guid? ReadInstanceId(string? credential)
@@ -272,9 +272,9 @@ internal static partial class AlidadeClient
     }
 }
 
-internal sealed class AlidadeConnectionException : Exception
+internal sealed class NuncConnectionException : Exception
 {
-    public AlidadeConnectionException(string message, bool pairingRequired = false) : base(message)
+    public NuncConnectionException(string message, bool pairingRequired = false) : base(message)
     {
         PairingRequired = pairingRequired;
     }

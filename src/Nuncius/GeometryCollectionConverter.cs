@@ -7,7 +7,7 @@ using Grasshopper.Kernel.Types;
 using Rhino;
 using Rhino.Geometry;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
 internal static class GeometryCollectionConverter
 {

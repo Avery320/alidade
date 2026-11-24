@@ -4,9 +4,9 @@ using System.Windows.Forms;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
-public sealed class ConnectToTorquetum : AlidadeAsyncComponent
+public sealed class ConnectToTorquetum : NuncAsyncComponent
 {
     private string? _attemptedCode;
     private bool _attempted;
@@ -29,8 +29,8 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
-        manager.AddParameter(new AlidadeProjectParameter());
-        manager.AddTextParameter("Status", "Status", "Alidade connection status.", GH_ParamAccess.item);
+        manager.AddParameter(new NuncProjectParameter());
+        manager.AddTextParameter("Status", "Status", "Nuncius connection status.", GH_ParamAccess.item);
     }
 
     protected override void SolveInstance(IGH_DataAccess data)
@@ -52,7 +52,7 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
             _attemptedCode = code;
             var connector = InstanceGuid;
             var documentId = document.RuntimeID;
-            StartRequest(document, null, cancellation => AlidadeClient.ConnectAsync(code, connector, documentId, cancellation),
+            StartRequest(document, null, cancellation => NuncClient.ConnectAsync(code, connector, documentId, cancellation),
                 session =>
                 {
                     _session = session;
@@ -68,11 +68,11 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
             return;
         }
 
-        data.SetData(0, new AlidadeProject(connected));
+        data.SetData(0, new NuncProject(connected));
         var project = connected.Status;
         var access = !project.CanRead ? "unavailable" : project.CanWrite ? "read/write" : "read-only";
         var warning = !project.CanRead || project.AvailabilityReason == "PROJECT_BUSY"
-            ? AlidadeClient.ErrorMessage(project.AvailabilityReason ?? "PROJECT_BUSY") : null;
+            ? NuncClient.ErrorMessage(project.AvailabilityReason ?? "PROJECT_BUSY") : null;
         ReportStatus(data, 1, $"{project.ProjectName} ({access})", warning);
     }
 
@@ -89,7 +89,7 @@ public sealed class ConnectToTorquetum : AlidadeAsyncComponent
         if (IsPending || !CanUseProject(document, session))
             return;
 
-        StartRequest(document, session, cancellation => AlidadeClient.ReadProjectAsync(session, document.RuntimeID, cancellation),
+        StartRequest(document, session, cancellation => NuncClient.ReadProjectAsync(session, document.RuntimeID, cancellation),
             status => session.Status = status);
     }
 

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
 internal sealed record CollectionDiagnostic(string Code, string Message, int[]? Path = null,
     int? ItemIndex = null, string? Field = null, bool Warning = false)
@@ -155,7 +155,7 @@ public sealed class GeometryCollection
                     throw CollectionFormatException.At("INVALID_STEP", "Expected a bounded STEP Part 21 document.", "step");
                 break;
             default:
-                throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind has no Alidade converter.", "kind");
+                throw CollectionFormatException.At("UNSUPPORTED_GEOMETRY", "This geometry kind has no Nuncius converter.", "kind");
         }
     }
 
@@ -288,7 +288,7 @@ public sealed class GeometryCollection
     private static JsonElement ReadContract()
     {
         using var resource = typeof(GeometryCollection).Assembly
-            .GetManifestResourceStream("Torquetum.Alidade.geometry-collection.schema.json")
+            .GetManifestResourceStream(typeof(GeometryCollection), "geometry-collection.schema.json")
             ?? throw new InvalidOperationException("The Tor API geometry collection schema is missing.");
         return JsonSerializer.Deserialize<JsonElement>(resource);
     }

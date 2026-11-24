@@ -9,18 +9,18 @@ using Grasshopper.Kernel.Types;
 using GH_IO.Serialization;
 using EtoApplication = Eto.Forms.Application;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
-public abstract class AlidadeAsyncComponent : GH_Component
+public abstract class NuncAsyncComponent : GH_Component
 {
     private CancellationTokenSource? _operation;
     private bool _triggerHigh = true;
 
-    protected AlidadeAsyncComponent(string name, string nickname, string description, string category)
-        : base(name, nickname, description, "Alidade", category) { }
+    protected NuncAsyncComponent(string name, string nickname, string description, string category)
+        : base(name, nickname, description, NuncAssemblyInfo.PluginName, category) { }
 
     protected bool IsPending => _operation != null;
-    private protected AlidadeConnectionException? Failure { get; private set; }
+    private protected NuncConnectionException? Failure { get; private set; }
     protected bool CanUse([NotNullWhen(true)] GH_Document? document) => document?.Enabled == true && !Locked;
 
     protected bool CanUseProject([NotNullWhen(true)] GH_Document? document,
@@ -33,7 +33,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
     }
 
     protected ProjectSession? ConnectedProject(IGH_DataAccess data, GH_Document? document) =>
-        SingleInput<AlidadeProject>(data, 0)?.Value is { } session && CanUseProject(document, session) ? session : null;
+        SingleInput<NuncProject>(data, 0)?.Value is { } session && CanUseProject(document, session) ? session : null;
 
     protected string? ExchangeId(IGH_DataAccess data, int index) =>
         SingleInput<string>(data, index)?.Trim() is { Length: > 0 } id ? id : null;
@@ -67,12 +67,12 @@ public abstract class AlidadeAsyncComponent : GH_Component
         Func<CancellationToken, Task<T>> request, Action<T> accept, Action<T>? abandon)
     {
         T result = default!;
-        AlidadeConnectionException? error = null;
+        NuncConnectionException? error = null;
         try { result = await request(operation.Token).ConfigureAwait(false); }
-        catch (Exception failure) when (failure is AlidadeConnectionException or HttpRequestException
+        catch (Exception failure) when (failure is NuncConnectionException or HttpRequestException
             or OperationCanceledException or CollectionFormatException or JsonException)
         {
-            error = failure as AlidadeConnectionException ?? new AlidadeConnectionException(failure switch
+            error = failure as NuncConnectionException ?? new NuncConnectionException(failure switch
             {
                 HttpRequestException => "Torquetum is unavailable. Check the running project and try again.",
                 OperationCanceledException => "Torquetum did not answer in time.",
@@ -93,7 +93,7 @@ public abstract class AlidadeAsyncComponent : GH_Component
             }
 
             if (error == null && project != null && !project.IsValidFor(document.RuntimeID))
-                error = new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+                error = new NuncConnectionException("Pair with the project again.", pairingRequired: true);
             if (error == null)
                 accept(result);
             else

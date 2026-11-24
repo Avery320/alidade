@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net7.0</TargetFramework>
     <TargetExt>.gha</TargetExt>
-    <RootNamespace>Torquetum.Alidade</RootNamespace>
+    <RootNamespace>Torquetum.Nuncius</RootNamespace>
     <Nullable>enable</Nullable>
     <Version>0.1.0</Version>
     <RhinoSdkVersion>8.6.24101.5001</RhinoSdkVersion>
@@ -25,6 +25,6 @@
     <PackageReference Include="System.Drawing.Common" Version="7.0.0" ExcludeAssets="runtime" PrivateAssets="all" />
     <PackageReference Include="Grasshopper" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" PrivateAssets="all" NoWarn="NU1701" />
     <PackageReference Include="RhinoCommon" Version="$(RhinoSdkVersion)" ExcludeAssets="runtime" PrivateAssets="all" NoWarn="NU1701" />
-    <InternalsVisibleTo Include="Alidade.Checks" />
+    <InternalsVisibleTo Include="Nuncius.Checks" />
   </ItemGroup>
 </Project>

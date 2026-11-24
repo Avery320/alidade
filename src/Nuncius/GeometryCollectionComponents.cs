@@ -5,7 +5,7 @@ using Grasshopper.Kernel;
 using Grasshopper.Kernel.Data;
 using Grasshopper.Kernel.Types;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
 internal static class CollectionOutputs
 {
@@ -29,8 +29,8 @@ internal static class CollectionOutputs
 public sealed class BuildGeometryCollection : GH_Component
 {
     public BuildGeometryCollection()
-        : base("Build Geometry Collection", "Build Collection", "Convert Rhino geometry and its tree to an Alidade collection.",
-            "Alidade", "Convert") { }
+        : base("Build Geometry Collection", "Build Collection", "Convert Rhino geometry and its tree to a Geometry Collection.",
+            NuncAssemblyInfo.PluginName, "Convert") { }
 
     public override Guid ComponentGuid => new("61799db7-0931-4460-b71c-a22097849a68");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("BuildCollection");
@@ -45,7 +45,7 @@ public sealed class BuildGeometryCollection : GH_Component
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
-        manager.AddParameter(new AlidadeCollectionParameter());
+        manager.AddParameter(new NuncCollectionParameter());
         manager.AddTextParameter("Diagnostics", "Diagnostics", "Conversion messages at the original paths and item indices.", GH_ParamAccess.tree);
     }
 
@@ -63,7 +63,7 @@ public sealed class BuildGeometryCollection : GH_Component
             var scale = GeometryCollectionConverter.MetresPerUnit(units, document);
             var collection = GeometryCollectionConverter.Build(geometry ?? new GH_Structure<IGH_Goo>(), scale, diagnostics, document);
             if (collection != null)
-                data.SetData(0, new AlidadeCollection(collection));
+                data.SetData(0, new NuncCollection(collection));
         }
         catch (CollectionFormatException error)
         {
@@ -77,15 +77,15 @@ public sealed class BuildGeometryCollection : GH_Component
 public sealed class UnpackGeometryCollection : GH_Component
 {
     public UnpackGeometryCollection()
-        : base("Unpack Geometry Collection", "Unpack Collection", "Convert an Alidade collection back to Rhino geometry and its tree.",
-            "Alidade", "Convert") { }
+        : base("Unpack Geometry Collection", "Unpack Collection", "Convert a Geometry Collection back to Rhino geometry and its tree.",
+            NuncAssemblyInfo.PluginName, "Convert") { }
 
     public override Guid ComponentGuid => new("41b84810-df87-4080-b29b-b731a9d53196");
     protected override System.Drawing.Bitmap Icon => ComponentIcons.Load("UnpackCollection");
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
-        manager.AddParameter(new AlidadeCollectionParameter());
+        manager.AddParameter(new NuncCollectionParameter());
         manager.AddTextParameter("Target Units", "Target Units", "Rhino unit name or mm, cm, m, in or ft. Uses the Rhino document when omitted.",
             GH_ParamAccess.item);
         manager[1].Optional = true;
@@ -99,7 +99,7 @@ public sealed class UnpackGeometryCollection : GH_Component
 
     protected override void SolveInstance(IGH_DataAccess data)
     {
-        AlidadeCollection? input = null;
+        NuncCollection? input = null;
         if (!data.GetData(0, ref input) || input?.Value is not { } collection)
             return;
 

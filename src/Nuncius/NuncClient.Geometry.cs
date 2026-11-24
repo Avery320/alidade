@@ -7,9 +7,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
-internal static partial class AlidadeClient
+internal static partial class NuncClient
 {
     private const string AsterismRoute = ApiPrefix + "/asterism";
 
@@ -23,20 +23,20 @@ internal static partial class AlidadeClient
     {
         var route = PortRoute("inputs", portId);
         if (collection.GeometryCount == 0)
-            throw new AlidadeConnectionException("Connect a collection that contains geometry.");
+            throw new NuncConnectionException("Connect a collection that contains geometry.");
 
         var access = await project.AccessAsync(documentId, cancellation).ConfigureAwait(false);
         using var discovery = access.Request(HttpMethod.Get, $"{AsterismRoute}/ports");
         var listing = await SendAsync<PortDirectory>(discovery, cancellation).ConfigureAwait(false);
         var target = listing.Items?.FirstOrDefault(port => port?.Id == portId && port.Direction == "input");
         if (target == null)
-            throw new AlidadeConnectionException(ErrorMessage("PORT_NOT_FOUND"));
+            throw new NuncConnectionException(ErrorMessage("PORT_NOT_FOUND"));
         if (!StrongTag(target.ETag))
-            throw new AlidadeConnectionException(ErrorMessage("PRECONDITION_REQUIRED"));
+            throw new NuncConnectionException(ErrorMessage("PRECONDITION_REQUIRED"));
 
         var payload = JsonSerializer.SerializeToUtf8Bytes(collection.Payload, JsonOptions);
         if (payload.Length > access.Status.MaxBodyBytes)
-            throw new AlidadeConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
+            throw new NuncConnectionException(ErrorMessage("CONTENT_TOO_LARGE"));
 
         var requestId = Guid.NewGuid();
         var receiptPath = $"{ApiPrefix}/requests/{requestId:D}";
@@ -49,7 +49,7 @@ internal static partial class AlidadeClient
 
             using var response = await SendForStatusAsync(request, HttpStatusCode.Accepted, cancellation).ConfigureAwait(false);
             if (response.Headers.Location?.OriginalString != receiptPath)
-                throw new AlidadeConnectionException("Torquetum returned an invalid receipt address.");
+                throw new NuncConnectionException("Torquetum returned an invalid receipt address.");
         }
 
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -75,7 +75,7 @@ internal static partial class AlidadeClient
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
-            throw new AlidadeConnectionException("Send confirmation timed out. Press Send again to publish the current collection.");
+            throw new NuncConnectionException("Send confirmation timed out. Press Send again to publish the current collection.");
         }
     }
 
@@ -95,7 +95,7 @@ internal static partial class AlidadeClient
     private static void ValidatePortId(string id)
     {
         if (id.Length == 0 || id.Any(character => !(char.IsAsciiLetterOrDigit(character) || character is '-' or '_')))
-            throw new AlidadeConnectionException("ID accepts letters, numbers, hyphens and underscores.");
+            throw new NuncConnectionException("ID accepts letters, numbers, hyphens and underscores.");
     }
 
     private static string PortRoute(string direction, string portId)

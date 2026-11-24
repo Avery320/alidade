@@ -7,7 +7,7 @@ using GH_IO.Serialization;
 using Grasshopper.Kernel;
 using Grasshopper.Kernel.Types;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
 internal sealed record ProjectStatus(
     string ProjectId, Guid InstanceId, string ProjectName, bool CanRead, bool CanWrite,
@@ -67,17 +67,17 @@ public sealed class ProjectSession
     internal async Task<ProjectAccess> AccessAsync(ulong documentId, CancellationToken cancellation)
     {
         if (documentId != _documentId)
-            throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+            throw new NuncConnectionException("Pair with the project again.", pairingRequired: true);
 
         await _renewal.WaitAsync(cancellation).ConfigureAwait(false);
         try
         {
             var access = Volatile.Read(ref _access)
-                ?? throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+                ?? throw new NuncConnectionException("Pair with the project again.", pairingRequired: true);
             if (_remembered == null)
             {
                 if (DateTimeOffset.UtcNow >= access.ExpiresAt)
-                    throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+                    throw new NuncConnectionException("Pair with the project again.", pairingRequired: true);
                 return access;
             }
 
@@ -86,9 +86,9 @@ public sealed class ProjectSession
                 && DateTimeOffset.UtcNow < access.ExpiresAt)
                 return access;
 
-            var next = await AlidadeClient.ResumeAccessAsync(_remembered, target, cancellation).ConfigureAwait(false);
+            var next = await NuncClient.ResumeAccessAsync(_remembered, target, cancellation).ConfigureAwait(false);
             if (!ReferenceEquals(Interlocked.CompareExchange(ref _access, next, access), access))
-                throw new AlidadeConnectionException("Pair with the project again.", pairingRequired: true);
+                throw new NuncConnectionException("Pair with the project again.", pairingRequired: true);
             Status = next.Status;
             return next;
         }
@@ -96,17 +96,17 @@ public sealed class ProjectSession
     }
 }
 
-public sealed class AlidadeProject : GH_Goo<ProjectSession?>
+public sealed class NuncProject : GH_Goo<ProjectSession?>
 {
-    public AlidadeProject() { }
-    internal AlidadeProject(ProjectSession? session) : base(session) { }
+    public NuncProject() { }
+    internal NuncProject(ProjectSession? session) : base(session) { }
 
     public override bool IsValid => Value?.IsValid == true;
-    public override string TypeName => "Alidade Project";
+    public override string TypeName => "Nuncius Project";
     public override string TypeDescription => "A live connection to a Torquetum project.";
-    public override IGH_Goo Duplicate() => new AlidadeProject(Value);
+    public override IGH_Goo Duplicate() => new NuncProject(Value);
     public override object ScriptVariable() => ToString();
-    public override string ToString() => IsValid && Value is { } session ? session.Status.ProjectName : "Disconnected Alidade project";
+    public override string ToString() => IsValid && Value is { } session ? session.Status.ProjectName : "Disconnected Nuncius project";
     public override bool Write(GH_IWriter writer) => true;
     public override bool Read(GH_IReader reader)
     {
@@ -115,10 +115,10 @@ public sealed class AlidadeProject : GH_Goo<ProjectSession?>
     }
 }
 
-public sealed class AlidadeProjectParameter : GH_Param<AlidadeProject>
+public sealed class NuncProjectParameter : GH_Param<NuncProject>
 {
-    public AlidadeProjectParameter()
-        : base("Project", "Project", "A live Torquetum project connection.", "Alidade", "Session", GH_ParamAccess.item) { }
+    public NuncProjectParameter()
+        : base("Project", "Project", "A live Torquetum project connection.", NuncAssemblyInfo.PluginName, "Session", GH_ParamAccess.item) { }
 
     public override Guid ComponentGuid => new("6300cb1e-3e9b-427e-b3d1-c39fed8ee509");
     public override GH_Exposure Exposure => GH_Exposure.hidden;

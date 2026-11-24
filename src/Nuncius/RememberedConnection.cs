@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
 internal sealed record RememberedConnection(string ProjectId, string Locator, string Secret, string PairingCodeHash)
 {
@@ -20,12 +20,12 @@ internal sealed record RememberedConnection(string ProjectId, string Locator, st
         {
             var home = Environment.GetEnvironmentVariable(OperatingSystem.IsWindows() ? "USERPROFILE" : "HOME")
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            if (!Path.IsPathFullyQualified(home)) throw new AlidadeConnectionException("The local user directory is unavailable.");
+            if (!Path.IsPathFullyQualified(home)) throw new NuncConnectionException("The local user directory is unavailable.");
             return Path.Combine(home, ".torquetum", "connections");
         }
     }
 
-    private static string FilePath(Guid connector) => Path.Combine(LocalDirectory, "alidade", $"{connector:N}.json");
+    private static string FilePath(Guid connector) => Path.Combine(LocalDirectory, "nuncius", $"{connector:N}.json");
 
     internal bool Matches(string? code) => string.IsNullOrWhiteSpace(code) || Hash(Encoding.UTF8.GetBytes(code)) == PairingCodeHash;
 
@@ -69,7 +69,7 @@ internal sealed record RememberedConnection(string ProjectId, string Locator, st
         {
             try { File.Delete(staged); }
             catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { }
-            throw new AlidadeConnectionException("Alidade could not save the connection for this user.");
+            throw new NuncConnectionException("Nuncius could not save the connection for this user.");
         }
     }
 
@@ -92,8 +92,8 @@ internal sealed record RememberedConnection(string ProjectId, string Locator, st
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
 
-        if (ambiguous) throw new AlidadeConnectionException("Close the duplicate Torquetum Project before reconnecting.");
-        return found ?? throw new AlidadeConnectionException("Open the remembered Project in Torquetum to reconnect.");
+        if (ambiguous) throw new NuncConnectionException("Close the duplicate Torquetum Project before reconnecting.");
+        return found ?? throw new NuncConnectionException("Open the remembered Project in Torquetum to reconnect.");
     }
 
     private static PublishedProject? ReadLocation(string file)

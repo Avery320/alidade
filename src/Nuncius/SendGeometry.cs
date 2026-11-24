@@ -1,9 +1,9 @@
 using System;
 using Grasshopper.Kernel;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
-public sealed class SendGeometry : AlidadeAsyncComponent
+public sealed class SendGeometry : NuncAsyncComponent
 {
     private sealed record Target(ProjectSession Project, string Id);
 
@@ -18,8 +18,8 @@ public sealed class SendGeometry : AlidadeAsyncComponent
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
-        manager.AddParameter(new AlidadeProjectParameter());
-        manager.AddParameter(new AlidadeCollectionParameter());
+        manager.AddParameter(new NuncProjectParameter());
+        manager.AddParameter(new NuncCollectionParameter());
         manager.AddTextParameter("ID", "ID", "Use the same ID on the Asterism Geometry Input.", GH_ParamAccess.item);
         manager.AddBooleanParameter("Send", "Send", "Connect a Grasshopper Button to send once per press.", GH_ParamAccess.item);
         for (var i = 0; i < 4; i++)
@@ -36,7 +36,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
         var document = OnPingDocument();
         var project = ConnectedProject(data, document);
         var id = ExchangeId(data, 2);
-        var collection = SingleInput<AlidadeCollection>(data, 1)?.Value;
+        var collection = SingleInput<NuncCollection>(data, 1)?.Value;
         var next = project != null && id != null ? new Target(project, id) : null;
         if (_target != next)
         {
@@ -52,7 +52,7 @@ public sealed class SendGeometry : AlidadeAsyncComponent
             var documentId = document.RuntimeID;
             StartRequest(document, target.Project, async cancellation =>
                 {
-                    await AlidadeClient.SendGeometryAsync(target.Project, documentId, target.Id, collection, cancellation)
+                    await NuncClient.SendGeometryAsync(target.Project, documentId, target.Id, collection, cancellation)
                         .ConfigureAwait(false);
                     return new WeakReference<GeometryCollection>(collection);
                 }, sent => _sent = sent);

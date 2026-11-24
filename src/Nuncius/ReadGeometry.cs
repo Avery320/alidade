@@ -1,9 +1,9 @@
 using System;
 using Grasshopper.Kernel;
 
-namespace Torquetum.Alidade;
+namespace Torquetum.Nuncius;
 
-public sealed class ReadGeometry : AlidadeAsyncComponent
+public sealed class ReadGeometry : NuncAsyncComponent
 {
     private sealed record Input(ProjectSession Project, string Id);
 
@@ -18,7 +18,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
 
     protected override void RegisterInputParams(GH_InputParamManager manager)
     {
-        manager.AddParameter(new AlidadeProjectParameter());
+        manager.AddParameter(new NuncProjectParameter());
         manager.AddTextParameter("ID", "ID", "Use the same ID on the Asterism Geometry Output.", GH_ParamAccess.item);
         manager.AddBooleanParameter("Read", "Read", "Connect a Grasshopper Button to read once per press.", GH_ParamAccess.item);
         manager[0].Optional = manager[1].Optional = manager[2].Optional = true;
@@ -26,7 +26,7 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
 
     protected override void RegisterOutputParams(GH_OutputParamManager manager)
     {
-        manager.AddParameter(new AlidadeCollectionParameter());
+        manager.AddParameter(new NuncCollectionParameter());
         manager.AddTextParameter("Status", "Status", "Latest read status.", GH_ParamAccess.item);
     }
 
@@ -46,11 +46,11 @@ public sealed class ReadGeometry : AlidadeAsyncComponent
         {
             var documentId = document.RuntimeID;
             StartRequest(document, input.Project,
-                cancellation => AlidadeClient.ReadGeometryAsync(input.Project, documentId, input.Id, cancellation),
+                cancellation => NuncClient.ReadGeometryAsync(input.Project, documentId, input.Id, cancellation),
                 result => _result = result);
         }
         if (_result is { } result)
-            data.SetData(0, new AlidadeCollection(result));
+            data.SetData(0, new NuncCollection(result));
 
         var status = project == null ? "Connect Project"
             : id == null ? "Set the Geometry Output ID"

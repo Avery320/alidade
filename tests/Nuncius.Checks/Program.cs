@@ -9,15 +9,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Grasshopper.Kernel.Types;
 using Rhino.Geometry;
-using Torquetum.Alidade;
+using Torquetum.Nuncius;
 
 if (args.Length is < 2 or > 3 || (args.Length == 3 && args[2] != "--exchange"))
-    throw new ArgumentException("Usage: Alidade.Checks <Alidade.gha> <geometry-collection-basic.json> [--exchange]");
+    throw new ArgumentException("Usage: Nuncius.Checks <Nuncius.gha> <geometry-collection-basic.json> [--exchange]");
 
 AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(args[0]));
-await AlidadeChecks.Run(args[1], args.Length == 3);
+await NuncChecks.Run(args[1], args.Length == 3);
 
-internal static class AlidadeChecks
+internal static class NuncChecks
 {
     internal static async Task Run(string fixturePath, bool exchange)
     {
@@ -87,9 +87,9 @@ internal static class AlidadeChecks
         const string id = "fixture";
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         var token = timeout.Token;
-        var session = await AlidadeClient.PairAsync(invite, documentId, token);
+        var session = await NuncClient.PairAsync(invite, documentId, token);
         Check(!session.IsValidFor(documentId + 1), "pairing is scoped to its Grasshopper document");
-        var status = await AlidadeClient.ReadProjectAsync(session, documentId, token);
+        var status = await NuncClient.ReadProjectAsync(session, documentId, token);
         Check(status.CanWrite, "the paired Project accepts writes");
 
         var initial = await RoundTrip(basic);
@@ -107,10 +107,10 @@ internal static class AlidadeChecks
 
         async Task<JsonElement> RoundTrip(GeometryCollection value)
         {
-            await AlidadeClient.SendGeometryAsync(session, documentId, id, value, token);
+            await NuncClient.SendGeometryAsync(session, documentId, id, value, token);
             Console.WriteLine("In Asterism, press Read on Geometry Input and Send on Geometry Output. Then press Enter here.");
             Check(Console.ReadLine() != null, "manual Asterism exchange confirmed");
-            var published = await AlidadeClient.ReadGeometryAsync(session, documentId, id, token);
+            var published = await NuncClient.ReadGeometryAsync(session, documentId, id, token);
             return published.Payload.GetProperty("branches");
         }
     }
